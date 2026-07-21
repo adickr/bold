@@ -43,6 +43,7 @@ class WeBuyCarsCollector(BaseCollector):
                     url,
                     url_substring="website-elastic-backend/api/search",
                     settle_ms=2500,
+                    scroll_rounds=max(4, self.settings.collector_max_pages // 2),
                 )
                 self.snapshot_raw(
                     "search_api_intercept",

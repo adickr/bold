@@ -70,6 +70,7 @@ def fetch_json_from_responses(
     url_substring: str,
     timeout_ms: int = 90000,
     settle_ms: int = 3000,
+    scroll_rounds: int = 8,
 ) -> list[Any]:
     """Open a page and capture JSON bodies from matching network responses."""
     captured: list[Any] = []
@@ -94,6 +95,26 @@ def fetch_json_from_responses(
         except Exception:
             logger.warning("networkidle timeout while capturing %s", url_substring)
         page.wait_for_timeout(settle_ms)
-        page.mouse.wheel(0, 3200)
-        page.wait_for_timeout(1500)
+
+        for _ in range(max(1, scroll_rounds)):
+            page.mouse.wheel(0, 4200)
+            page.wait_for_timeout(900)
+            # Click common "next / load more" controls if present
+            for selector in (
+                "button:has-text('Load more')",
+                "button:has-text('Show more')",
+                "a:has-text('Next')",
+                "button:has-text('Next')",
+                "[aria-label='Next']",
+                "button[aria-label*='next' i]",
+            ):
+                try:
+                    loc = page.locator(selector).first
+                    if loc.count() and loc.is_visible():
+                        loc.click(timeout=1500)
+                        page.wait_for_timeout(1200)
+                        break
+                except Exception:
+                    continue
+        page.wait_for_timeout(1000)
     return captured

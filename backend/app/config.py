@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     preferred_province: str = "Western Cape"
     default_sort: str = "price_asc"  # price_asc | deal_score_desc
     enforce_max_price: bool = False
+    collector_max_pages: int = 15  # pages per source per collect run
+    collector_results_per_page: int = 50
 
     # Collection intervals (seconds)
     marketplace_interval_seconds: int = 3 * 60 * 60

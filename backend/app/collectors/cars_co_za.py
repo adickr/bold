@@ -29,16 +29,48 @@ class CarsCoZaCollector(BaseCollector):
             return self.SEARCH_URL_WC
         return self.SEARCH_URL
 
-    def build_search_params(self) -> dict[str, Any]:
+    def build_search_params(self, page: int = 1) -> dict[str, Any]:
         params: dict[str, Any] = {
             "mileage_to": self.settings.stretch_mileage_km,
+            "P": page,
         }
         if self.settings.enforce_max_price:
             params["price_to"] = self.settings.stretch_price_zar
         return params
 
     def search(self) -> list[ListingPayload]:
-        url = f"{self.search_base_url()}?{urlencode(self.build_search_params())}"
+        all_listings: list[ListingPayload] = []
+        seen: set[str] = set()
+        max_pages = max(1, self.settings.collector_max_pages)
+        for page in range(1, max_pages + 1):
+            url = f"{self.search_base_url()}?{urlencode(self.build_search_params(page))}"
+            page_listings = self._search_one_page(url)
+            if not page_listings:
+                logger.info("Cars.co.za page %s returned 0 — stopping", page)
+                break
+            gained = 0
+            for item in page_listings:
+                if item.source_listing_id in seen:
+                    continue
+                seen.add(item.source_listing_id)
+                all_listings.append(item)
+                gained += 1
+            logger.info(
+                "Cars.co.za page %s: parsed %s (unique total %s, +%s)",
+                page,
+                len(page_listings),
+                len(all_listings),
+                gained,
+            )
+            if gained == 0:
+                break
+            if len(page_listings) < 8:
+                break
+        if not all_listings:
+            raise CollectorError("Cars.co.za: no listings parsed", parser_broken=True)
+        return all_listings
+
+    def _search_one_page(self, url: str) -> list[ListingPayload]:
         listings: list[ListingPayload] = []
         html = ""
 
@@ -47,7 +79,7 @@ class CarsCoZaCollector(BaseCollector):
             self.snapshot_raw("search", html)
             listings = self.parse_search_html(html)
         except Exception:
-            logger.exception("Cars.co.za HTTP search failed")
+            logger.exception("Cars.co.za HTTP search failed for %s", url)
 
         if not listings and playwright_available() and self.settings.use_playwright:
             try:
@@ -58,10 +90,8 @@ class CarsCoZaCollector(BaseCollector):
                 self.snapshot_raw("search_rendered", html)
                 listings = self.parse_search_html(html)
             except Exception:
-                logger.exception("Cars.co.za Playwright search failed")
+                logger.exception("Cars.co.za Playwright search failed for %s", url)
 
-        if not listings:
-            raise CollectorError("Cars.co.za: no listings parsed", parser_broken=True)
         return listings
 
     def parse_search_html(self, html: str) -> list[ListingPayload]:

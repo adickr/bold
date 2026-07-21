@@ -29,7 +29,8 @@ class AutoTraderCollector(BaseCollector):
     category = "marketplace"
 
     SEARCH_URL = "https://www.autotrader.co.za/cars-for-sale/toyota/fortuner"
-    SEARCH_URL_WC = "https://www.autotrader.co.za/cars-for-sale/western-cape/toyota/fortuner"
+    # Province URLs need the province id segment (p-9 = Western Cape)
+    SEARCH_URL_WC = "https://www.autotrader.co.za/cars-for-sale/western-cape/p-9/toyota/fortuner"
 
     def search_base_url(self) -> str:
         preferred = (self.settings.preferred_province or "").strip().lower()
@@ -37,37 +38,63 @@ class AutoTraderCollector(BaseCollector):
             return self.SEARCH_URL_WC
         return self.SEARCH_URL
 
-    def build_search_params(self) -> dict[str, Any]:
+    def build_search_params(self, page: int = 1) -> dict[str, Any]:
         params: dict[str, Any] = {
             "mileage_to": self.settings.stretch_mileage_km,
-            "rcp": 50,
+            "rcp": self.settings.collector_results_per_page,
         }
-        # Price is open — sort/score prefer cheaper; optional comfort cap only if enabled
+        if page > 1:
+            params["pagenumber"] = page
         if self.settings.enforce_max_price:
             params["price_to"] = self.settings.stretch_price_zar
         return params
 
     def search(self) -> list[ListingPayload]:
-        url = f"{self.search_base_url()}?{urlencode(self.build_search_params())}"
-        listings: list[ListingPayload] = []
+        all_listings: list[ListingPayload] = []
+        max_pages = max(1, self.settings.collector_max_pages)
+        for page in range(1, max_pages + 1):
+            url = f"{self.search_base_url()}?{urlencode(self.build_search_params(page))}"
+            page_listings = self._search_one_page(url)
+            if not page_listings:
+                logger.info("AutoTrader page %s returned 0 listings — stopping", page)
+                break
+            before = len(all_listings)
+            all_listings.extend(page_listings)
+            all_listings = self._dedupe(all_listings)
+            gained = len(all_listings) - before
+            logger.info(
+                "AutoTrader page %s: parsed %s (unique total %s, +%s)",
+                page,
+                len(page_listings),
+                len(all_listings),
+                gained,
+            )
+            if gained == 0:
+                break
+            # Typical page size ~20–50; stop early if clearly last page
+            if len(page_listings) < 8:
+                break
+        listings = [x for x in all_listings if self.is_detail_url(x.url)]
+        if not listings:
+            raise CollectorError("AutoTrader: no listings parsed", parser_broken=True)
+        return listings
 
+    def _search_one_page(self, url: str) -> list[ListingPayload]:
+        listings: list[ListingPayload] = []
         try:
             html = self.fetch_text(url)
             self.snapshot_raw("search", html)
             listings = self.parse_all(html)
         except Exception:
-            logger.exception("AutoTrader HTTP search failed")
+            logger.exception("AutoTrader HTTP search failed for %s", url)
 
         if (not listings) and playwright_available() and self.settings.use_playwright:
             try:
                 listings = self.search_with_playwright(url)
             except Exception:
-                logger.exception("AutoTrader Playwright search failed")
+                logger.exception("AutoTrader Playwright search failed for %s", url)
 
-        listings = [x for x in listings if self.is_detail_url(x.url)]
-        if not listings:
-            raise CollectorError("AutoTrader: no listings parsed", parser_broken=True)
-        return self._dedupe(listings)
+        return [x for x in listings if self.is_detail_url(x.url)]
 
     def search_with_playwright(self, url: str) -> list[ListingPayload]:
         with browser_page() as page:
