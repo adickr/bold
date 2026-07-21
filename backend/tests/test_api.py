@@ -18,6 +18,13 @@ def test_public_health(client):
     res = client.get("/api/public/health")
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
+    assert client.get("/health").status_code == 200
+
+
+def test_login_page_public(client):
+    res = client.get("/login")
+    assert res.status_code == 200
+    assert b"Sign in" in res.content
 
 
 def test_api_requires_auth(client):
@@ -41,9 +48,24 @@ def test_dashboard_and_listings(client, db_session, auth):
     assert detail.status_code == 200
     assert "inferred" in detail.json()
 
-    html = client.get("/", auth=auth)
+    html = client.get("/", auth=auth, follow_redirects=True)
     assert html.status_code == 200
     assert b"Fortuner Agent" in html.content
+
+    # Form login path (clear session first)
+    client.get("/logout", follow_redirects=False)
+    logged_out = client.get("/", follow_redirects=False)
+    assert logged_out.status_code in {303, 307}
+    assert "/login" in logged_out.headers.get("location", "")
+    login = client.post(
+        "/login",
+        data={"username": auth[0], "password": auth[1], "next": "/"},
+        follow_redirects=False,
+    )
+    assert login.status_code == 303
+    home = client.get("/")
+    assert home.status_code == 200
+    assert b"Toyota Fortuner" in home.content or b"Fortuner" in home.content
 
 
 def test_shortlist_flow(client, db_session, auth):

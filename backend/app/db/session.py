@@ -18,6 +18,7 @@ def _make_engine():
     connect_args = {}
     if url.startswith("sqlite"):
         connect_args["check_same_thread"] = False
+        connect_args["timeout"] = 30
     engine = create_engine(url, connect_args=connect_args, future=True)
 
     if url.startswith("sqlite"):
@@ -26,6 +27,7 @@ def _make_engine():
         def set_sqlite_pragma(dbapi_connection, connection_record):  # noqa: ARG001
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA busy_timeout=30000")
             cursor.close()
 
     return engine

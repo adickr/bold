@@ -35,16 +35,24 @@ source .venv/bin/activate
 python -V                  # should show 3.10+ / 3.12.x
 
 pip install -r requirements.txt
-mkdir -p ../data/raw
+mkdir -p data/raw
 export PYTHONPATH=.
 export DATABASE_URL=sqlite:///./data/fortuner.db
 export COLLECTOR_MODE=fixture
 export ENABLE_SCHEDULER=false
 python scripts/seed.py
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open http://localhost:8000 — default login `buyer` / `fortuner`.
+Open **http://127.0.0.1:8000/login** — default login `buyer` / `fortuner`.
+
+If the page does not load, check the server is up:
+
+```bash
+curl -s http://127.0.0.1:8000/health
+```
+
+You should see `{"status":"ok",...}`.
 
 ## Docker
 

@@ -6,10 +6,10 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
-from app.api.auth import require_user
 from app.api.routes import router as api_router
 from app.api.web import router as web_router
 from app.config import get_settings
@@ -41,11 +41,18 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         docs_url="/api/docs" if settings.app_env != "production" else None,
     )
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.secret_key.get_secret_value(),
+        same_site="lax",
+        https_only=False,
+    )
     static_dir = Path(__file__).parent / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     app.include_router(api_router)
     app.include_router(web_router)
 
+    @app.get("/health")
     @app.get("/api/public/health")
     def public_health():
         return {"status": "ok", "app": settings.app_name}

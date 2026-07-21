@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.auth import require_user
+from app.api.auth import (
+    _valid_credentials,
+    login_user,
+    logout_user,
+    require_web_user,
+)
 from app.api.queries import dashboard_stats, filter_vehicles, vehicle_to_dict
 from app.db.session import get_db
 from app.models.entities import CanonicalVehicle, ShortlistEntry
@@ -22,7 +28,7 @@ from app.schemas.listings import (
 from app.services.shortlist import ShortlistService, draft_dealer_message
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[1] / "templates"))
-router = APIRouter(dependencies=[Depends(require_user)])
+router = APIRouter()
 
 
 def _fmt_zar(value: int | None) -> str:
@@ -34,8 +40,56 @@ def _fmt_zar(value: int | None) -> str:
 templates.env.filters["zar"] = _fmt_zar
 
 
+@router.get("/login", response_class=HTMLResponse)
+def page_login(request: Request, next: str = "/", error: str | None = None):
+    if request.session.get("user"):
+        return RedirectResponse(next or "/", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "pages/login.html",
+        {
+            "user": None,
+            "next_path": next or "/",
+            "error": error,
+            "page": "login",
+        },
+    )
+
+
+@router.post("/login")
+def do_login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/"),
+):
+    if not _valid_credentials(username, password):
+        return templates.TemplateResponse(
+            request,
+            "pages/login.html",
+            {
+                "user": None,
+                "next_path": next or "/",
+                "error": "Invalid username or password",
+                "page": "login",
+            },
+            status_code=401,
+        )
+    login_user(request, username)
+    target = next if next.startswith("/") else "/"
+    return RedirectResponse(target, status_code=303)
+
+
+@router.get("/logout")
+def do_logout(request: Request):
+    logout_user(request)
+    return RedirectResponse("/login", status_code=303)
+
+
 @router.get("/", response_class=HTMLResponse)
-def page_dashboard(request: Request, db: Session = Depends(get_db), user: str = Depends(require_user)):
+def page_dashboard(
+    request: Request, db: Session = Depends(get_db), user: str = Depends(require_web_user)
+):
     stats = dashboard_stats(db)
     vehicles = filter_vehicles(db, VehicleFilterParams())[:8]
     return templates.TemplateResponse(
@@ -54,7 +108,7 @@ def page_dashboard(request: Request, db: Session = Depends(get_db), user: str = 
 def page_listings(
     request: Request,
     db: Session = Depends(get_db),
-    user: str = Depends(require_user),
+    user: str = Depends(require_web_user),
     min_price: int | None = None,
     max_price: int | None = None,
     max_mileage: int | None = None,
@@ -102,7 +156,7 @@ def page_vehicle(
     vehicle_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: str = Depends(require_user),
+    user: str = Depends(require_web_user),
 ):
     vehicle = db.execute(
         select(CanonicalVehicle)
@@ -116,7 +170,6 @@ def page_vehicle(
     ).scalar_one_or_none()
     if not vehicle:
         return HTMLResponse("Not found", status_code=404)
-    draft = None
     if vehicle.shortlist_entry and vehicle.shortlist_entry.draft_message:
         draft = vehicle.shortlist_entry.draft_message
     else:
@@ -138,7 +191,7 @@ def page_vehicle(
 def page_add_shortlist(
     vehicle_id: int,
     db: Session = Depends(get_db),
-    user: str = Depends(require_user),
+    user: str = Depends(require_web_user),
     notes: str = Form(""),
     status: str = Form("watching"),
 ):
@@ -152,7 +205,7 @@ def page_add_shortlist(
 def page_update_shortlist(
     entry_id: int,
     db: Session = Depends(get_db),
-    user: str = Depends(require_user),
+    user: str = Depends(require_web_user),
     status: str = Form(...),
     notes: str = Form(""),
     interest_level: int = Form(3),
@@ -177,7 +230,9 @@ def page_update_shortlist(
 
 
 @router.get("/shortlist", response_class=HTMLResponse)
-def page_shortlist(request: Request, db: Session = Depends(get_db), user: str = Depends(require_user)):
+def page_shortlist(
+    request: Request, db: Session = Depends(get_db), user: str = Depends(require_web_user)
+):
     entries = ShortlistService(db).list_entries()
     return templates.TemplateResponse(
         request,
@@ -194,7 +249,7 @@ def page_shortlist(request: Request, db: Session = Depends(get_db), user: str = 
 def page_refresh_draft(
     vehicle_id: int,
     db: Session = Depends(get_db),
-    user: str = Depends(require_user),
+    user: str = Depends(require_web_user),
     preferred_offer_zar: int | None = Form(None),
 ):
     vehicle = db.get(CanonicalVehicle, vehicle_id)

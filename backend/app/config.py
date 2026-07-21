@@ -13,7 +13,7 @@ from app import version_check as _version_check  # noqa: F401
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     user_agent: str = (
         "FortunerBuyingAgent/1.0 (+private research; respectful low-volume)"
     )
-    enable_scheduler: bool = True
+    enable_scheduler: bool = False
 
     # Scoring weights (must sum conceptually to 100 before penalties)
     score_weight_price: float = 30.0

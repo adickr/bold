@@ -1,4 +1,4 @@
-# Requires Python 3.10+ (3.12 recommended)
+itsdangerous==2.2.0
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 sqlalchemy==2.0.36

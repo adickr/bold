@@ -19,7 +19,7 @@
         <a href="/shortlist" class="{% if page == 'shortlist' %}active{% endif %}">Shortlist</a>
         <a href="/api/docs" target="_blank" rel="noreferrer">API</a>
       </nav>
-      <span class="user">{{ user }}</span>
+      <span class="user">{% if user %}{{ user }} · <a href="/logout">Logout</a>{% else %}guest{% endif %}</span>
     </header>
     <main>
       {% block content %}{% endblock %}
