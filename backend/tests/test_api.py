@@ -97,3 +97,6 @@ def test_html_parser_autotrader():
     parsed = collector.parse_search_html(html)
     assert len(parsed) == 1
     assert parsed[0].price_zar == 669900
+    assert parsed[0].source_listing_id == "28096599"
+    assert "28096599" in parsed[0].url
+    assert "/toyota/fortuner/" in parsed[0].url

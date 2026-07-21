@@ -6,15 +6,22 @@ import json
 import logging
 import re
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from bs4 import BeautifulSoup
 
 from app.collectors.base import BaseCollector, CollectorError
-from app.collectors.browser import fetch_rendered_html, playwright_available
+from app.collectors.browser import browser_page, playwright_available
 from app.schemas.listings import ListingPayload
 
 logger = logging.getLogger(__name__)
+
+# Real detail URLs look like:
+# /car-for-sale/toyota/fortuner/2.8gd-6-4x4-vx/28096596
+DETAIL_PATH_RE = re.compile(
+    r"^/car-for-sale/(?:[^/]+/){1,6}(?P<id>\d{6,})/?$",
+    re.I,
+)
 
 
 class AutoTraderCollector(BaseCollector):
@@ -32,7 +39,6 @@ class AutoTraderCollector(BaseCollector):
 
     def search(self) -> list[ListingPayload]:
         url = f"{self.SEARCH_URL}?{urlencode(self.build_search_params())}"
-        html = ""
         listings: list[ListingPayload] = []
 
         try:
@@ -42,20 +48,76 @@ class AutoTraderCollector(BaseCollector):
         except Exception:
             logger.exception("AutoTrader HTTP search failed")
 
-        if not listings and playwright_available() and self.settings.use_playwright:
+        if (not listings) and playwright_available() and self.settings.use_playwright:
             try:
-                html = fetch_rendered_html(
-                    url,
-                    wait_selector="a[href*='/car-for-sale/'], a[href*='/cars-for-sale/']",
-                )
-                self.snapshot_raw("search_rendered", html)
-                listings = self.parse_all(html)
+                listings = self.search_with_playwright(url)
             except Exception:
                 logger.exception("AutoTrader Playwright search failed")
 
+        listings = [x for x in listings if self.is_detail_url(x.url)]
         if not listings:
             raise CollectorError("AutoTrader: no listings parsed", parser_broken=True)
-        return listings
+        return self._dedupe(listings)
+
+    def search_with_playwright(self, url: str) -> list[ListingPayload]:
+        with browser_page() as page:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=45000)
+            except Exception:
+                pass
+            page.wait_for_timeout(2500)
+            page.mouse.wheel(0, 3500)
+            page.wait_for_timeout(1500)
+            html = page.content()
+            self.snapshot_raw("search_rendered", html)
+            listings = self.parse_all(html)
+            if listings:
+                return listings
+
+            # Direct DOM extraction of detail anchors (most reliable)
+            rows = page.eval_on_selector_all(
+                "a[href*='/car-for-sale/']",
+                """els => els.map(a => {
+                  const card = a.closest('article, li, div') || a.parentElement;
+                  const text = card ? card.innerText : a.innerText;
+                  const img = card ? card.querySelector('img') : null;
+                  return {
+                    href: a.href,
+                    text: text || '',
+                    img: img ? (img.currentSrc || img.src || img.getAttribute('data-src') || '') : ''
+                  };
+                })""",
+            )
+            results: list[ListingPayload] = []
+            seen: set[str] = set()
+            for row in rows or []:
+                href = (row or {}).get("href") or ""
+                if not self.is_detail_url(href):
+                    continue
+                listing_id = self.listing_id_from_url(href)
+                if not listing_id or listing_id in seen:
+                    continue
+                seen.add(listing_id)
+                text = row.get("text") or ""
+                if "fortuner" not in text.lower() and "fortuner" not in href.lower():
+                    continue
+                results.append(
+                    ListingPayload(
+                        source=self.source,
+                        source_listing_id=listing_id,
+                        url=href.split("?")[0],
+                        title=self._title_from_text(text) or f"Toyota Fortuner {listing_id}",
+                        variant_raw=self._title_from_text(text),
+                        price_zar=self._extract_price(text),
+                        mileage_km=self._extract_mileage(text),
+                        year=self._extract_year(text),
+                        image_urls=[row["img"]] if row.get("img") else [],
+                        make="Toyota",
+                        model="Fortuner",
+                    )
+                )
+            return results
 
     def parse_all(self, html: str) -> list[ListingPayload]:
         listings = self.parse_search_html(html)
@@ -63,43 +125,52 @@ class AutoTraderCollector(BaseCollector):
             listings = self.parse_vehicle_data_blobs(html)
         if not listings:
             listings = self.parse_embedded_json(html)
-        return listings
+        return [x for x in listings if self.is_detail_url(x.url)]
 
     def parse_search_html(self, html: str) -> list[ListingPayload]:
         soup = BeautifulSoup(html, "html.parser")
-        cards = soup.select(
-            "[data-testid='listing-card'], article.listing-card, .result-card, "
-            "[data-listing-id], li[data-testid*='result'], div[data-vehicle-id]"
-        )
-        # Broader fallback: any anchor to a listing detail page
-        if not cards:
-            cards = soup.select("a[href*='/car-for-sale/'], a[href*='/cars-for-sale/']")
+        # Only singular /car-for-sale/.../{id} detail links — never /cars-for-sale/ search links
+        anchors = soup.select("a[href*='/car-for-sale/']")
         results: list[ListingPayload] = []
         seen: set[str] = set()
-        for card in cards:
+        for link in anchors:
             try:
-                if card.name == "a":
-                    link = card
-                    container = card.parent
-                else:
-                    link = card.select_one("a[href*='/car-for-sale/'], a[href*='/cars-for-sale/']")
-                    container = card
-                href = link["href"] if link and link.has_attr("href") else None
+                href = link.get("href")
                 if not href:
                     continue
                 if href.startswith("/"):
                     href = f"https://www.autotrader.co.za{href}"
-                listing_id = self._extract_id(href, container if container is not None else card)
-                if listing_id in seen:
+                href = href.split("?")[0]
+                if not self.is_detail_url(href):
+                    continue
+                listing_id = self.listing_id_from_url(href)
+                if not listing_id or listing_id in seen:
                     continue
                 seen.add(listing_id)
+                container = link.find_parent(["article", "li", "div"]) or link.parent
                 title_el = None
                 if hasattr(container, "select_one"):
                     title_el = container.select_one("h2, h3, .title, [data-testid='listing-title']")
-                meta = container.get_text(" ", strip=True) if container is not None else link.get_text(" ", strip=True)
-                price_el = container.select_one(".price, [data-testid='price']") if hasattr(container, "select_one") else None
-                location_el = container.select_one(".location, [data-testid='location']") if hasattr(container, "select_one") else None
-                dealer_el = container.select_one(".dealer, [data-testid='dealer']") if hasattr(container, "select_one") else None
+                meta = (
+                    container.get_text(" ", strip=True)
+                    if container is not None
+                    else link.get_text(" ", strip=True)
+                )
+                price_el = (
+                    container.select_one(".price, [data-testid='price']")
+                    if hasattr(container, "select_one")
+                    else None
+                )
+                location_el = (
+                    container.select_one(".location, [data-testid='location']")
+                    if hasattr(container, "select_one")
+                    else None
+                )
+                dealer_el = (
+                    container.select_one(".dealer, [data-testid='dealer']")
+                    if hasattr(container, "select_one")
+                    else None
+                )
                 img = container.select_one("img") if hasattr(container, "select_one") else None
                 image_urls = []
                 if img is not None:
@@ -110,14 +181,14 @@ class AutoTraderCollector(BaseCollector):
                     if not image_urls and img.has_attr("srcset"):
                         image_urls.append(img.get("srcset").split(",")[0].strip().split(" ")[0])
                 title = title_el.get_text(strip=True) if title_el else (link.get_text(strip=True) or None)
-                if title and "fortuner" not in title.lower() and "fortuner" not in meta.lower():
+                if "fortuner" not in (title or "").lower() and "fortuner" not in meta.lower() and "fortuner" not in href.lower():
                     continue
                 results.append(
                     ListingPayload(
                         source=self.source,
                         source_listing_id=listing_id,
                         url=href,
-                        title=title,
+                        title=title or f"Toyota Fortuner {listing_id}",
                         variant_raw=title,
                         price_zar=self._extract_price(price_el.get_text() if price_el else meta),
                         mileage_km=self._extract_mileage(meta),
@@ -134,7 +205,6 @@ class AutoTraderCollector(BaseCollector):
         return results
 
     def parse_vehicle_data_blobs(self, html: str) -> list[ListingPayload]:
-        """Parse embedded vehicle_data JSON objects used by AutoTrader pages."""
         results: list[ListingPayload] = []
         for match in re.finditer(r"vehicle_data\s*=\s*(\{.*?\});", html, flags=re.S):
             try:
@@ -142,7 +212,6 @@ class AutoTraderCollector(BaseCollector):
             except Exception:
                 continue
             results.extend(self._from_vehicle_data(data))
-        # Also scan for JSON script tags containing listing arrays
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup.select("script"):
             text = tag.string or ""
@@ -159,9 +228,19 @@ class AutoTraderCollector(BaseCollector):
     def _from_vehicle_data(self, data: dict[str, Any]) -> list[ListingPayload]:
         listing_id = str(data.get("id") or data.get("listingId") or data.get("advertId") or "")
         title = data.get("title") or data.get("name") or data.get("derivative")
+        raw_url = data.get("url") or data.get("listingUrl") or data.get("seoUrl")
+        if raw_url and raw_url.startswith("/"):
+            raw_url = f"https://www.autotrader.co.za{raw_url}"
+        if raw_url and not self.is_detail_url(raw_url):
+            raw_url = None
+        if not listing_id and raw_url:
+            listing_id = self.listing_id_from_url(raw_url) or ""
         if not listing_id:
             return []
         if title and "fortuner" not in str(title).lower() and data.get("model") != "Fortuner":
+            return []
+        # Only emit if we have a real detail URL — never invent short /car-for-sale/{id}
+        if not raw_url:
             return []
         price = data.get("price") or data.get("priceZar") or data.get("askingPrice")
         mileage = data.get("mileage") or data.get("odometer") or data.get("km")
@@ -169,14 +248,16 @@ class AutoTraderCollector(BaseCollector):
             ListingPayload(
                 source=self.source,
                 source_listing_id=listing_id,
-                url=data.get("url") or f"https://www.autotrader.co.za/car-for-sale/{listing_id}",
+                url=raw_url.split("?")[0],
                 title=str(title) if title else None,
                 variant_raw=str(title) if title else None,
                 year=data.get("year") or data.get("modelYear"),
                 price_zar=int(price) if price not in (None, "") else None,
                 mileage_km=int(mileage) if mileage not in (None, "") else None,
                 colour=data.get("colour") or data.get("color"),
-                dealer_name=(data.get("dealer") or {}).get("name") if isinstance(data.get("dealer"), dict) else data.get("dealerName"),
+                dealer_name=(data.get("dealer") or {}).get("name")
+                if isinstance(data.get("dealer"), dict)
+                else data.get("dealerName"),
                 dealer_location=data.get("suburb") or data.get("city") or data.get("province"),
                 image_urls=list(data.get("images") or data.get("imageUrls") or []),
                 make="Toyota",
@@ -189,21 +270,25 @@ class AutoTraderCollector(BaseCollector):
         ]
 
     def parse_embedded_json(self, html: str) -> list[ListingPayload]:
-        matches = re.findall(
-            r'\{\s*"id"\s*:\s*"?(?P<id>\d+)"?.*?"title"\s*:\s*"(?P<title>[^"]*Fortuner[^"]*)".*?"price"\s*:\s*(?P<price>\d+)',
-            html,
-            flags=re.I | re.S,
-        )
+        # Prefer explicit URL captures over inventing paths
         results: list[ListingPayload] = []
-        for listing_id, title, price in matches[:80]:
+        seen: set[str] = set()
+        for match in re.finditer(
+            r"https://www\.autotrader\.co\.za/car-for-sale/toyota/fortuner/[^\"'\s>]+/\d{6,}",
+            html,
+            flags=re.I,
+        ):
+            href = match.group(0).split("?")[0]
+            listing_id = self.listing_id_from_url(href)
+            if not listing_id or listing_id in seen:
+                continue
+            seen.add(listing_id)
             results.append(
                 ListingPayload(
                     source=self.source,
-                    source_listing_id=str(listing_id),
-                    url=f"https://www.autotrader.co.za/car-for-sale/{listing_id}",
-                    title=title,
-                    variant_raw=title,
-                    price_zar=int(price),
+                    source_listing_id=listing_id,
+                    url=href,
+                    title=f"Toyota Fortuner {listing_id}",
                     make="Toyota",
                     model="Fortuner",
                 )
@@ -213,15 +298,39 @@ class AutoTraderCollector(BaseCollector):
     def parse_fixture_html(self, html: str) -> list[ListingPayload]:
         return self.parse_search_html(html)
 
+    @classmethod
+    def is_detail_url(cls, url: str | None) -> bool:
+        if not url:
+            return False
+        path = urlparse(url).path
+        return bool(DETAIL_PATH_RE.match(path))
+
+    @classmethod
+    def listing_id_from_url(cls, url: str) -> str | None:
+        path = urlparse(url).path
+        m = DETAIL_PATH_RE.match(path)
+        if m:
+            return m.group("id")
+        # Last resort: final numeric segment only on /car-for-sale/ paths
+        if "/car-for-sale/" not in path:
+            return None
+        tail = path.rstrip("/").split("/")[-1]
+        return tail if tail.isdigit() and len(tail) >= 6 else None
+
     @staticmethod
-    def _extract_id(url: str, card: Any) -> str:
-        data_id = None
-        if hasattr(card, "get"):
-            data_id = card.get("data-listing-id") or card.get("data-id") or card.get("data-vehicle-id")
-        if data_id:
-            return str(data_id)
-        m = re.search(r"/(\d{5,})", url)
-        return m.group(1) if m else url.rstrip("/").split("/")[-1]
+    def _dedupe(listings: list[ListingPayload]) -> list[ListingPayload]:
+        out: dict[str, ListingPayload] = {}
+        for item in listings:
+            out[item.source_listing_id] = item
+        return list(out.values())
+
+    @staticmethod
+    def _title_from_text(text: str) -> str | None:
+        for line in (text or "").splitlines():
+            line = line.strip()
+            if "fortuner" in line.lower() and len(line) < 120:
+                return line
+        return None
 
     @staticmethod
     def _extract_year(text: str) -> int | None:
