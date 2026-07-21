@@ -28,9 +28,10 @@ class Settings(BaseSettings):
     dashboard_username: str = "buyer"
     dashboard_password: SecretStr = SecretStr("fortuner")
 
-    # Search criteria
+    # Search / budget criteria
+    # Price is soft: no hard reject. Comfort budget used for scoring/alerts only.
     max_price_zar: int = 700_000
-    stretch_price_zar: int = 725_000
+    stretch_price_zar: int = 725_000  # legacy alias; no longer used to exclude listings
     max_mileage_km: int = 100_000
     stretch_mileage_km: int = 110_000
     make: str = "Toyota"
@@ -38,6 +39,7 @@ class Settings(BaseSettings):
     required_drivetrain: str = "4x4"
     preferred_province: str = "Western Cape"
     default_sort: str = "price_asc"  # price_asc | deal_score_desc
+    enforce_max_price: bool = False
 
     # Collection intervals (seconds)
     marketplace_interval_seconds: int = 3 * 60 * 60

@@ -45,6 +45,22 @@ def test_stretch_price_flagged():
     assert result.is_stretch is True
 
 
+def test_high_price_not_rejected():
+    listing = ListingPayload(
+        source="t",
+        source_listing_id="3b",
+        url="http://x",
+        title="2024 Toyota Fortuner VX 4x4",
+        price_zar=950000,
+        mileage_km=15000,
+        drivetrain="4x4",
+    )
+    result = evaluate_listing(listing)
+    assert result.accepted is True
+    assert result.is_stretch is True
+    assert "above_comfort_price" in result.reasons
+
+
 def test_fixture_collectors_return_listings():
     settings = get_settings()
     for source in ("autotrader", "cars_co_za", "webuycars"):

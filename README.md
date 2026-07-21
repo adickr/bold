@@ -7,7 +7,7 @@ This is **not** a public classifieds site. The core value is cross-site history,
 ## Features (MVP)
 
 - Independent collectors for **AutoTrader**, **Cars.co.za**, and **WeBuyCars**
-- Hard filters: Toyota Fortuner, 4x4, ≤100 000 km, ≤R700 000 (stretch up to R725 000 / ~110 000 km)
+- Hard filters: Toyota Fortuner, 4x4, ≤100 000 km (stretch mileage ~110 000 km). **No hard price cap** — comfort budget ~R700 000 is for scoring/alerts only; browse sorts cheapest first
 - Browse defaults: Western Cape · 4x4 · ≤100 000 km · sort lowest price first (dashboard spotlights can still surface exceptional finds elsewhere)
 - Observation history (never overwrite prior prices)
 - Variant normalisation (VX, GR-S, 2.8 GD-6, etc.)
@@ -74,7 +74,7 @@ Or click **Collect live listings now** on the dashboard after restarting with th
 
 Notes:
 - Keep volume low; this is a private tool
-- Listings outside 4x4 / R725k / ~110k km are filtered out
+- Listings outside 4x4 / ~110k km are filtered out (price is not a hard reject)
 - Asking prices only — not sold prices
 
 

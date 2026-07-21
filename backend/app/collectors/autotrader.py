@@ -38,11 +38,14 @@ class AutoTraderCollector(BaseCollector):
         return self.SEARCH_URL
 
     def build_search_params(self) -> dict[str, Any]:
-        return {
-            "price_to": self.settings.stretch_price_zar,
+        params: dict[str, Any] = {
             "mileage_to": self.settings.stretch_mileage_km,
             "rcp": 50,
         }
+        # Price is open — sort/score prefer cheaper; optional comfort cap only if enabled
+        if self.settings.enforce_max_price:
+            params["price_to"] = self.settings.stretch_price_zar
+        return params
 
     def search(self) -> list[ListingPayload]:
         url = f"{self.search_base_url()}?{urlencode(self.build_search_params())}"

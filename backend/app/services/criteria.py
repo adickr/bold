@@ -68,11 +68,10 @@ def evaluate_listing(
 
     if price is None:
         risks.append("missing_price")
-    elif price > settings.stretch_price_zar:
-        return CriteriaResult(False, reasons=["price_too_high"], variant=variant)
     elif price > settings.max_price_zar:
+        # Price is not a hard reject — prefer cheaper via sort/score, but flag above comfort budget
         is_stretch = True
-        reasons.append("stretch_price")
+        reasons.append("above_comfort_price")
 
     if mileage is None:
         risks.append("missing_mileage")

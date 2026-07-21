@@ -3,11 +3,11 @@
 {% block content %}
 <section class="section-head">
   <h1>Listings</h1>
-  <p class="lede">Default view: Western Cape · 4x4 · ≤100k km · lowest price first. Spotlights on the dashboard still surface exceptional finds elsewhere.</p>
+  <p class="lede">Default view: Western Cape · 4x4 · ≤100k km · lowest price first. No price cap — expensive finds still appear (sorted down the list) and can surface in dashboard spotlights.</p>
 </section>
 
 <form class="filters" method="get" action="/listings">
-  <label>Max price <input type="number" name="max_price" value="{{ filters.max_price or '' }}" placeholder="700000" /></label>
+  <label>Max price <input type="number" name="max_price" value="{{ filters.max_price or '' }}" placeholder="any" /></label>
   <label>Max km <input type="number" name="max_mileage" value="{{ filters.max_mileage or '' }}" placeholder="100000" /></label>
   <label>Min year <input type="number" name="min_year" value="{{ filters.min_year or '' }}" placeholder="2018" /></label>
   <label>Variant <input type="text" name="variant" value="{{ filters.variant or '' }}" placeholder="VX / GR-S" /></label>
