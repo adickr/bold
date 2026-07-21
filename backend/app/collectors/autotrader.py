@@ -101,6 +101,14 @@ class AutoTraderCollector(BaseCollector):
                 location_el = container.select_one(".location, [data-testid='location']") if hasattr(container, "select_one") else None
                 dealer_el = container.select_one(".dealer, [data-testid='dealer']") if hasattr(container, "select_one") else None
                 img = container.select_one("img") if hasattr(container, "select_one") else None
+                image_urls = []
+                if img is not None:
+                    for attr in ("src", "data-src", "data-lazy-src", "data-original"):
+                        if img.has_attr(attr) and img.get(attr):
+                            image_urls.append(img.get(attr))
+                            break
+                    if not image_urls and img.has_attr("srcset"):
+                        image_urls.append(img.get("srcset").split(",")[0].strip().split(" ")[0])
                 title = title_el.get_text(strip=True) if title_el else (link.get_text(strip=True) or None)
                 if title and "fortuner" not in title.lower() and "fortuner" not in meta.lower():
                     continue
@@ -116,7 +124,7 @@ class AutoTraderCollector(BaseCollector):
                         year=self._extract_year(meta),
                         dealer_location=location_el.get_text(strip=True) if location_el else None,
                         dealer_name=dealer_el.get_text(strip=True) if dealer_el else None,
-                        image_urls=[img["src"]] if img and img.has_attr("src") else [],
+                        image_urls=image_urls,
                         make="Toyota",
                         model="Fortuner",
                     )

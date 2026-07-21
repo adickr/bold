@@ -11,10 +11,48 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.entities import CanonicalVehicle, PriceEvent, ShortlistEntry
 from app.schemas.listings import DashboardStats, VehicleFilterParams
+from app.services.media import absolute_url, source_label
 
 
 def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
     shortlist = v.shortlist_entry
+    sources = []
+    for s in getattr(v, "source_listings", []) or []:
+        sources.append(
+            {
+                "id": s.id,
+                "source": s.source,
+                "label": source_label(s.source),
+                "url": absolute_url(s.url, source=s.source) or s.url,
+                "price": s.price_zar,
+                "status": s.listing_status,
+                "title": s.title,
+            }
+        )
+    # Prefer cheapest active source as primary outbound link
+    active_sources = [
+        s for s in sources if s.get("status") in {"active", "relisted", "possibly_removed"}
+    ]
+    primary_source = None
+    if active_sources:
+        primary_source = sorted(
+            active_sources,
+            key=lambda x: x.get("price") if x.get("price") is not None else 10**12,
+        )[0]
+    elif sources:
+        primary_source = sources[0]
+
+    image_candidates: list[str] = []
+    if v.primary_image_url:
+        abs_primary = absolute_url(v.primary_image_url)
+        if abs_primary:
+            image_candidates.append(abs_primary)
+    for s in getattr(v, "source_listings", []) or []:
+        for img in s.image_urls or []:
+            abs_img = absolute_url(img, source=s.source)
+            if abs_img and abs_img not in image_candidates:
+                image_candidates.append(abs_img)
+
     return {
         "id": v.id,
         "year": v.year,
@@ -32,7 +70,11 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
         "source_count": v.source_count,
         "shortlist_status": shortlist.status if shortlist else None,
         "is_stretch": v.is_stretch_candidate,
-        "image": v.primary_image_url,
+        "image": image_candidates[0] if image_candidates else None,
+        "images": image_candidates[:8],
+        "sources": sources,
+        "primary_source": primary_source,
+        "detail_path": f"/vehicles/{v.id}",
         "risk_flags": v.risk_flags or [],
         "is_active": v.is_active,
         "drivetrain": v.drivetrain,

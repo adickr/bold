@@ -24,6 +24,7 @@ from app.schemas.listings import ListingPayload
 from app.services.criteria import evaluate_listing
 from app.services.dedup import score_pair, should_auto_merge
 from app.services.market import compute_comparable_stats, refresh_market_fields
+from app.services.media import absolute_url, normalise_image_urls
 from app.services.scoring import compute_deal_score, compute_motivation_score
 
 logger = logging.getLogger(__name__)
@@ -168,7 +169,7 @@ class IngestionService:
                 listing.listing_status = ListingStatus.RELISTED.value
 
         # Apply fields
-        listing.url = payload.url
+        listing.url = absolute_url(payload.url, source=payload.source) or payload.url
         listing.title = payload.title
         listing.description = payload.description
         listing.dealer_name = payload.dealer_name
@@ -193,7 +194,7 @@ class IngestionService:
         listing.colour = payload.colour
         listing.vin = payload.vin
         listing.registration = payload.registration
-        listing.image_urls = payload.image_urls or []
+        listing.image_urls = normalise_image_urls(payload.image_urls, source=payload.source)
         listing.is_stretch_candidate = criteria.is_stretch
         listing.risk_flags = criteria.risk_flags
         listing.raw_payload = payload.raw_payload

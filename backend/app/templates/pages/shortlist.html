@@ -29,6 +29,13 @@
           <a href="/vehicles/{{ e.canonical_vehicle_id }}">
             {{ e.canonical_vehicle.year }} {{ e.canonical_vehicle.variant_normalised }}
           </a>
+          {% if e.canonical_vehicle.source_listings %}
+          <div class="row-actions">
+            {% for s in e.canonical_vehicle.source_listings[:2] %}
+              <a href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.source }}</a>{% if not loop.last %} · {% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
         </td>
         <td>{{ e.canonical_vehicle.current_lowest_price | zar }}</td>
         <td>{% if e.canonical_vehicle.current_mileage_km %}{{ "{:,}".format(e.canonical_vehicle.current_mileage_km) }} km{% else %}—{% endif %}</td>

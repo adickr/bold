@@ -13,7 +13,7 @@
         <th>Reduction</th>
         <th>Deal</th>
         <th>Motivation</th>
-        <th>Sources</th>
+        <th>Links</th>
         <th>Shortlist</th>
       </tr>
     </thead>
@@ -21,10 +21,22 @@
       {% for v in vehicles %}
       <tr>
         <td class="thumb">
-          {% if v.image %}<img src="{{ v.image }}" alt="" loading="lazy" />{% else %}<span class="ph">—</span>{% endif %}
+          {% if v.image %}
+            <a href="{{ v.detail_path }}">
+              <img src="{{ v.image }}" alt="" loading="lazy" referrerpolicy="no-referrer" />
+            </a>
+          {% else %}<span class="ph">—</span>{% endif %}
         </td>
         <td>{{ v.year or '—' }}</td>
-        <td><a href="/vehicles/{{ v.id }}">{{ v.variant or 'Fortuner' }}{% if v.is_stretch %} <em class="tag">stretch</em>{% endif %}</a></td>
+        <td>
+          <a href="{{ v.detail_path }}"><strong>{{ v.variant or 'Fortuner' }}</strong>{% if v.is_stretch %} <em class="tag">stretch</em>{% endif %}</a>
+          <div class="row-actions">
+            <a href="{{ v.detail_path }}">Details</a>
+            {% if v.primary_source and v.primary_source.url %}
+              · <a href="{{ v.primary_source.url }}" target="_blank" rel="noopener noreferrer">{{ v.primary_source.label }}</a>
+            {% endif %}
+          </div>
+        </td>
         <td>{{ v.price | zar }}</td>
         <td>{% if v.mileage %}{{ "{:,}".format(v.mileage) }} km{% else %}—{% endif %}</td>
         <td>{{ v.location or '—' }}</td>
@@ -33,7 +45,14 @@
         <td>{% if v.total_reduction %}{{ v.total_reduction | zar }}{% else %}—{% endif %}</td>
         <td><span class="score">{{ v.deal_score if v.deal_score is not none else '—' }}</span></td>
         <td>{{ v.motivation_level or '—' }}</td>
-        <td>{{ v.source_count }}</td>
+        <td class="links-cell">
+          <a class="btn-link" href="{{ v.detail_path }}">Agent detail</a>
+          {% for s in v.sources[:3] %}
+            {% if s.url %}
+              <a class="btn-link external" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>
+            {% endif %}
+          {% endfor %}
+        </td>
         <td>{{ v.shortlist_status or '—' }}</td>
       </tr>
       {% else %}
