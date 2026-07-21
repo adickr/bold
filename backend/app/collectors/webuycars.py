@@ -1,9 +1,20 @@
-"""WeBuyCars collector — prefers intercepted public search JSON via Playwright."""
+"""WeBuyCars collector — public elastic search API with proof-of-work.
+
+Primary path posts to:
+  https://appgateway.webuycars.co.za/website-elastic-backend/api/search
+
+using the same PoW flow as the website (challenge → solve → validate →
+x-proof-of-work-token). Playwright intercept remains a fallback.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import random
 import re
+import time
+import uuid
 from typing import Any
 from urllib.parse import urlencode
 
@@ -15,28 +26,136 @@ from app.schemas.listings import ListingPayload
 
 logger = logging.getLogger(__name__)
 
+API_BASE = "https://appgateway.webuycars.co.za"
+SEARCH_API = f"{API_BASE}/website-elastic-backend/api/search"
+POW_CHALLENGE = f"{API_BASE}/website-nest-backend/api/v1/proof-of-work/challenge"
+POW_VALIDATE = f"{API_BASE}/website-nest-backend/api/v1/proof-of-work/validate"
+
+
+def _write_uint32(buf: list[int], val: int, n: int) -> int:
+    buf[n] = (val >> 24) & 255
+    buf[n + 1] = (val >> 16) & 255
+    buf[n + 2] = (val >> 8) & 255
+    buf[n + 3] = val & 255
+    return n + 4
+
+
+def _gen_nonce(buf: list[int]) -> None:
+    ts = int(time.time() * 1000)
+    n = _write_uint32(buf, (ts // 4294967296) & 0xFFFFFFFF, 0)
+    n = _write_uint32(buf, ts & 0xFFFFFFFF, n)
+    end = n + 4 * ((len(buf) - n) // 4)
+    while n < end:
+        _write_uint32(buf, int(4294967296 * random.random()) & 0xFFFFFFFF, n)
+        n += 4
+    while n < len(buf):
+        buf[n] = int(256 * random.random()) & 255
+        n += 1
+
+
+def _check_complexity(digest: bytes, complexity: int) -> bool:
+    if complexity >= 8 * len(digest):
+        return False
+    n = 0
+    o = 0
+    while n <= complexity - 8:
+        if digest[o] != 0:
+            return False
+        n += 8
+        o += 1
+    mask = (255 << (8 + n - complexity)) & 255
+    return (digest[o] & mask) == 0
+
+
+def solve_proof_of_work(challenge_hex: str, difficulty: int) -> str:
+    """Match the website Solver: SHA256(challenge || nonce) with leading zero bits."""
+    prefix = bytes.fromhex(challenge_hex)
+    nonce = [0] * 16
+    while True:
+        _gen_nonce(nonce)
+        digest = hashlib.sha256(prefix + bytes(nonce)).digest()
+        if _check_complexity(digest, int(difficulty)):
+            return ",".join(str(b) for b in nonce)
+
 
 class WeBuyCarsCollector(BaseCollector):
     source = "webuycars"
     category = "marketplace"
 
     SEARCH_URL = "https://www.webuycars.co.za/buy-a-car"
+    PAGE_SIZE = 24
 
     def build_search_params(self) -> dict[str, Any]:
-        # SPA expects JSON-array query values, e.g. Make=["Toyota"]
+        """Browser URL params (fallback / Playwright). Prefer q= like the live site."""
         params: dict[str, Any] = {
-            "Make": '["Toyota"]',
-            "Model": '["Fortuner"]',
+            "q": "Toyota Fortuner",
         }
         preferred = (self.settings.preferred_province or "").strip().lower()
         if preferred in {"western cape", "wc", "western-cape"}:
-            params["Provinces"] = '["Western Cape"]'
+            params["Province"] = '["Western Cape"]'
         return params
 
+    def build_api_body(self, *, offset: int, size: int) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "to": offset,
+            "size": size,
+            "type": "Vehicle",
+            "filter_type": "all",
+            "subcategory": None,
+            "q": "Toyota Fortuner",
+            "Make": ["Toyota"],
+            "Model": ["Fortuner"],
+            "Roadworthy": None,
+            "Auctions": [],
+            "Variant": None,
+            "DealerKey": None,
+            "FuelType": None,
+            "BodyType": None,
+            "Gearbox": None,
+            # Hard buyer pref — API values are uppercase 4X4 / 4X2
+            "AxleConfiguration": ["4X4"],
+            "Colour": None,
+            "FinanceGrade": None,
+            "Priced_Amount_Gte": 0,
+            "Priced_Amount_Lte": 0,
+            "MonthlyInstallment_Amount_Gte": 0,
+            "MonthlyInstallment_Amount_Lte": 0,
+            "auctionDate": None,
+            "auctionEndDate": None,
+            "auctionDurationInSeconds": None,
+            "Kilometers_Gte": 0,
+            # 0 = no mileage cap at API level (criteria still applies stretch)
+            "Kilometers_Lte": 0,
+            "Priced_Amount_Sort": "asc",
+            "Bid_Amount_Sort": "",
+            "Kilometers_Sort": "",
+            "Year_Sort": "",
+            "Auction_Date_Sort": "",
+            "Auction_Lot_Sort": "",
+            "Year": [],
+            "Price_Update_Date_Sort": "",
+            "Online_Auction_Date_Sort": "",
+            "Online_Auction_In_Progress": "",
+            "Province": None,
+        }
+        preferred = (self.settings.preferred_province or "").strip().lower()
+        if preferred in {"western cape", "wc", "western-cape"}:
+            # Collect WC-first; criteria/browse still apply. Broad national pass
+            # happens via AxleConfiguration-only when WC returns thin stock.
+            body["Province"] = ["Western Cape"]
+        return body
+
     def search(self) -> list[ListingPayload]:
-        url = f"{self.SEARCH_URL}?{urlencode(self.build_search_params())}"
         listings: list[ListingPayload] = []
 
+        try:
+            listings = self.search_via_api()
+            if listings:
+                return self._dedupe(listings)
+        except Exception:
+            logger.exception("WeBuyCars API search failed")
+
+        url = f"{self.SEARCH_URL}?{urlencode(self.build_search_params())}"
         if playwright_available() and self.settings.use_playwright:
             try:
                 payloads = fetch_json_from_responses(
@@ -66,7 +185,6 @@ class WeBuyCarsCollector(BaseCollector):
             except Exception:
                 logger.exception("WeBuyCars Playwright HTML failed")
 
-        # Plain HTTP rarely works (SPA shell only), but try for completeness.
         try:
             html = self.fetch_text(url)
             self.snapshot_raw("search", html)
@@ -78,6 +196,128 @@ class WeBuyCarsCollector(BaseCollector):
         if not listings:
             raise CollectorError("WeBuyCars: no listings parsed", parser_broken=True)
         return self._dedupe(listings)
+
+    def obtain_pow_token(self) -> str:
+        fingerprint = f"fortuner-agent-{uuid.uuid4().hex}"
+        challenge_resp = self.client.post(
+            f"{POW_CHALLENGE}?fingerprintId={fingerprint}",
+            json={"fingerprintId": fingerprint},
+            headers=self._api_headers(),
+        )
+        challenge_resp.raise_for_status()
+        challenge = challenge_resp.json()
+        challenge_hex = challenge["challenge"]
+        difficulty = int(challenge["difficulty"])
+        solution = solve_proof_of_work(challenge_hex, difficulty)
+        validate_resp = self.client.post(
+            f"{POW_VALIDATE}?fingerprintId={fingerprint}",
+            json={
+                "fingerprintId": fingerprint,
+                "token": solution,
+                "challenge": challenge_hex,
+            },
+            headers=self._api_headers(),
+        )
+        validate_resp.raise_for_status()
+        token = (validate_resp.json() or {}).get("token")
+        if not token:
+            raise CollectorError("WeBuyCars: PoW validate returned no token")
+        return str(token)
+
+    def _api_headers(self, pow_token: str | None = None) -> dict[str, str]:
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Origin": "https://www.webuycars.co.za",
+            "Referer": "https://www.webuycars.co.za/buy-a-car?q=Toyota+Fortuner",
+            "User-Agent": self.settings.user_agent,
+        }
+        if pow_token:
+            headers["x-proof-of-work-token"] = pow_token
+        return headers
+
+    def search_via_api(self) -> list[ListingPayload]:
+        """Paginate Fortuner 4x4 results via the public elastic API."""
+        pow_token = self.obtain_pow_token()
+        page_size = self.PAGE_SIZE
+        max_pages = max(1, self.settings.collector_max_pages)
+        max_results = max_pages * page_size
+
+        # Pass 1: preferred province (if set). Pass 2: nationwide 4x4 fill.
+        passes: list[dict[str, Any]] = []
+        preferred = (self.settings.preferred_province or "").strip()
+        if preferred:
+            passes.append({"Province": [preferred]})
+        passes.append({"Province": None})  # nationwide top-up
+
+        all_listings: list[ListingPayload] = []
+        seen: set[str] = set()
+
+        for pass_filters in passes:
+            offset = 0
+            total: int | None = None
+            pages = 0
+            while pages < max_pages and len(seen) < max_results:
+                body = self.build_api_body(offset=offset, size=page_size)
+                body.update(pass_filters)
+                self.throttle()
+                resp = self.client.post(
+                    SEARCH_API,
+                    json=body,
+                    headers=self._api_headers(pow_token),
+                )
+                if resp.status_code in {401, 403}:
+                    # Token expired — refresh once
+                    pow_token = self.obtain_pow_token()
+                    resp = self.client.post(
+                        SEARCH_API,
+                        json=body,
+                        headers=self._api_headers(pow_token),
+                    )
+                resp.raise_for_status()
+                payload = resp.json()
+                if pages == 0:
+                    self.snapshot_raw(
+                        "search_api",
+                        {
+                            "filters": pass_filters,
+                            "total": payload.get("total"),
+                            "sample": (payload.get("data") or [])[:2],
+                        },
+                    )
+                batch = self.parse_api_json(payload)
+                if total is None:
+                    total_obj = payload.get("total") or {}
+                    total = int(total_obj.get("value") or 0) if isinstance(total_obj, dict) else None
+                gained = 0
+                for item in batch:
+                    if item.source_listing_id in seen:
+                        continue
+                    seen.add(item.source_listing_id)
+                    all_listings.append(item)
+                    gained += 1
+                logger.info(
+                    "WeBuyCars API %s offset=%s batch=%s gained=%s unique=%s total=%s",
+                    pass_filters,
+                    offset,
+                    len(batch),
+                    gained,
+                    len(seen),
+                    total,
+                )
+                pages += 1
+                if not batch:
+                    break
+                offset += len(batch)
+                if total is not None and offset >= total:
+                    break
+                if len(batch) < page_size:
+                    break
+
+            # If WC pass already returned a healthy set, still do nationwide
+            # top-up so exceptional non-WC stock can surface in spotlights.
+
+        return all_listings
 
     def parse_api_json(self, data: Any) -> list[ListingPayload]:
         items: list[Any] = []
@@ -131,8 +371,8 @@ class WeBuyCarsCollector(BaseCollector):
             branch = (
                 row.get("BranchName")
                 or row.get("branchName")
-                or row.get("branch")
                 or row.get("DealerKey")
+                or row.get("branch")
             )
             if branch and province:
                 dealer_location = f"{branch}, {province}"
@@ -201,10 +441,18 @@ class WeBuyCarsCollector(BaseCollector):
                     urls.append(str(url))
             elif item:
                 urls.append(str(item))
-        return urls[:12]
+        # Normalise relative CDN paths
+        normalised: list[str] = []
+        for url in urls[:12]:
+            if url.startswith("//"):
+                normalised.append(f"https:{url}")
+            elif url.startswith("/"):
+                normalised.append(f"https://www.webuycars.co.za{url}")
+            else:
+                normalised.append(url)
+        return normalised
 
     def parse_json_ld(self, html: str) -> list[ListingPayload]:
-        from bs4 import BeautifulSoup
         import json
 
         soup = BeautifulSoup(html, "html.parser")
@@ -277,11 +525,9 @@ class WeBuyCarsCollector(BaseCollector):
                     continue
                 text = card.get_text(" ", strip=True)
                 if "fortuner" not in text.lower() and "Fortuner" not in (card.get("data-model") or ""):
-                    # detail cards sometimes only show stock in href; keep if stock-like URL
                     if "/Toyota/" in href or "fortuner" in href.lower():
                         pass
                     elif "fortuner" not in href.lower():
-                        # still allow stock pages
                         if not re.search(r"/buy-a-car/[A-Z0-9]{6,}", href, re.I):
                             continue
                 seen.add(str(stock))
