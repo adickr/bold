@@ -29,9 +29,11 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
                 "title": s.title,
             }
         )
-    # Prefer cheapest active source as primary outbound link
+    # Prefer cheapest *active* source as primary outbound link
     active_sources = [
-        s for s in sources if s.get("status") in {"active", "relisted", "possibly_removed"}
+        s
+        for s in sources
+        if s.get("status") in {"active", "relisted"}
     ]
     primary_source = None
     if active_sources:
@@ -40,6 +42,7 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
             key=lambda x: x.get("price") if x.get("price") is not None else 10**12,
         )[0]
     elif sources:
+        # Fall back only for detail context; UI should still mark removed
         primary_source = sources[0]
 
     image_candidates: list[str] = []
@@ -48,10 +51,19 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
         if abs_primary:
             image_candidates.append(abs_primary)
     for s in getattr(v, "source_listings", []) or []:
+        if s.listing_status not in {"active", "relisted"}:
+            continue
         for img in s.image_urls or []:
             abs_img = absolute_url(img, source=s.source)
             if abs_img and abs_img not in image_candidates:
                 image_candidates.append(abs_img)
+    # If only removed sources have images, still show something
+    if not image_candidates:
+        for s in getattr(v, "source_listings", []) or []:
+            for img in s.image_urls or []:
+                abs_img = absolute_url(img, source=s.source)
+                if abs_img and abs_img not in image_candidates:
+                    image_candidates.append(abs_img)
 
     return {
         "id": v.id,

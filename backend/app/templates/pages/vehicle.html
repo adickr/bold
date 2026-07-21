@@ -17,18 +17,20 @@
       {% if summary.total_reduction %}<span>−{{ summary.total_reduction | zar }} total</span>{% endif %}
     </div>
     <div class="actions" style="margin-top:1rem">
-      {% if summary.primary_source and summary.primary_source.url %}
-        <a class="button-link" href="{{ summary.primary_source.url }}" target="_blank" rel="noopener noreferrer">
-          Open on {{ summary.primary_source.label }}
+      {% set active_sources = summary.sources | selectattr('status', 'in', ['active', 'relisted']) | list %}
+      {% if active_sources %}
+        {% set primary = active_sources|sort(attribute='price')|first %}
+        <a class="button-link" href="{{ primary.url }}" target="_blank" rel="noopener noreferrer">
+          Open on {{ primary.label }}
         </a>
-      {% endif %}
-      {% for s in summary.sources %}
-        {% if summary.primary_source and s.url == summary.primary_source.url %}{% else %}
-          {% if s.url %}
+        {% for s in active_sources %}
+          {% if s.url != primary.url %}
             <a class="button-link secondary" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>
           {% endif %}
-        {% endif %}
-      {% endfor %}
+        {% endfor %}
+      {% else %}
+        <p class="risk">No active source listings remain for this vehicle.</p>
+      {% endif %}
     </div>
   </div>
   <div class="detail-media">
@@ -52,15 +54,21 @@
     <h2>Where it’s listed</h2>
     <ul class="source-list">
       {% for s in v.source_listings %}
-      <li>
+      <li class="{% if s.listing_status not in ['active', 'relisted'] %}muted{% endif %}">
         <div class="source-row">
-          <a class="button-link" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">
-            View on {{ {'autotrader':'AutoTrader','cars_co_za':'Cars.co.za','webuycars':'WeBuyCars'}.get(s.source, s.source) }}
-          </a>
-          <span>{{ s.price_zar | zar }} · {{ s.listing_status }}</span>
+          {% if s.listing_status in ['active', 'relisted'] %}
+            <a class="button-link" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">
+              View on {{ {'autotrader':'AutoTrader','cars_co_za':'Cars.co.za','webuycars':'WeBuyCars'}.get(s.source, s.source) }}
+            </a>
+          {% else %}
+            <span class="button-link secondary">{{ {'autotrader':'AutoTrader','cars_co_za':'Cars.co.za','webuycars':'WeBuyCars'}.get(s.source, s.source) }} ({{ s.listing_status.replace('_',' ') }})</span>
+          {% endif %}
+          <span>{{ s.price_zar | zar }} · {{ s.listing_status.replace('_', ' ') }}</span>
         </div>
         <div class="muted">{{ s.title }}</div>
-        <div class="muted tiny">{{ s.url }}</div>
+        {% if s.listing_status in ['active', 'relisted'] %}
+          <div class="muted tiny">{{ s.url }}</div>
+        {% endif %}
         <div class="muted tiny">Raw variant preserved: {{ s.variant_raw }}</div>
       </li>
       {% endfor %}

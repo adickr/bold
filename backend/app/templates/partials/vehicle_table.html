@@ -47,7 +47,7 @@
         <td>{{ v.motivation_level or '—' }}</td>
         <td class="links-cell">
           <a class="btn-link" href="{{ v.detail_path }}">Agent detail</a>
-          {% for s in v.sources[:3] %}
+          {% for s in v.sources if s.status in ['active', 'relisted'] %}
             {% if s.url %}
               <a class="btn-link external" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>
             {% endif %}
