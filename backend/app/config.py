@@ -1,10 +1,14 @@
 """Application configuration via environment variables."""
 
+from __future__ import annotations
+
 from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app import version_check as _version_check  # noqa: F401
 
 
 class Settings(BaseSettings):

@@ -17,13 +17,23 @@ This is **not** a public classifieds site. The core value is cross-site history,
 - Password-protected SSR dashboard + JSON API
 - Docker Compose deployment with PostgreSQL
 
+## Requirements
+
+- **Python 3.10+** (3.12 recommended). macOS system Python 3.9 will fail.
+- Or Docker (no local Python needed)
+
 ## Quick start (local)
 
 ```bash
 cp .env.example .env
 cd backend
-python -m venv .venv
+
+# Use Python 3.12 if your default python3 is older (common on macOS):
+#   brew install python@3.12
+python3.12 -m venv .venv   # or: python3 -m venv .venv  (if already 3.10+)
 source .venv/bin/activate
+python -V                  # should show 3.10+ / 3.12.x
+
 pip install -r requirements.txt
 mkdir -p ../data/raw
 export PYTHONPATH=.

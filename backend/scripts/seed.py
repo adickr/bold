@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from app import version_check as _version_check  # noqa: F401
 from app.config import get_settings
 from app.db.session import SessionLocal, init_db
 from app.workers.scheduler import run_all_collectors
