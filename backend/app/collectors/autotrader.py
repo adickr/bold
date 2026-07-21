@@ -29,6 +29,13 @@ class AutoTraderCollector(BaseCollector):
     category = "marketplace"
 
     SEARCH_URL = "https://www.autotrader.co.za/cars-for-sale/toyota/fortuner"
+    SEARCH_URL_WC = "https://www.autotrader.co.za/cars-for-sale/western-cape/toyota/fortuner"
+
+    def search_base_url(self) -> str:
+        preferred = (self.settings.preferred_province or "").strip().lower()
+        if preferred in {"western cape", "wc", "western-cape"}:
+            return self.SEARCH_URL_WC
+        return self.SEARCH_URL
 
     def build_search_params(self) -> dict[str, Any]:
         return {
@@ -38,7 +45,7 @@ class AutoTraderCollector(BaseCollector):
         }
 
     def search(self) -> list[ListingPayload]:
-        url = f"{self.SEARCH_URL}?{urlencode(self.build_search_params())}"
+        url = f"{self.search_base_url()}?{urlencode(self.build_search_params())}"
         listings: list[ListingPayload] = []
 
         try:

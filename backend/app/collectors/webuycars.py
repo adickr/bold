@@ -24,10 +24,14 @@ class WeBuyCarsCollector(BaseCollector):
 
     def build_search_params(self) -> dict[str, Any]:
         # SPA expects JSON-array query values, e.g. Make=["Toyota"]
-        return {
+        params: dict[str, Any] = {
             "Make": '["Toyota"]',
             "Model": '["Fortuner"]',
         }
+        preferred = (self.settings.preferred_province or "").strip().lower()
+        if preferred in {"western cape", "wc", "western-cape"}:
+            params["Provinces"] = '["Western Cape"]'
+        return params
 
     def search(self) -> list[ListingPayload]:
         url = f"{self.SEARCH_URL}?{urlencode(self.build_search_params())}"
@@ -122,7 +126,21 @@ class WeBuyCarsCollector(BaseCollector):
             mileage = row.get("Mileage") or row.get("mileage") or row.get("odo")
             year = row.get("Year") or row.get("year")
             colour = row.get("Colour") or row.get("colour") or row.get("color")
-            branch = row.get("DealerKey") or row.get("Province") or row.get("branch")
+            province = row.get("Province") or row.get("province")
+            branch = (
+                row.get("BranchName")
+                or row.get("branchName")
+                or row.get("branch")
+                or row.get("DealerKey")
+            )
+            if branch and province:
+                dealer_location = f"{branch}, {province}"
+            elif province:
+                dealer_location = str(province)
+            elif branch:
+                dealer_location = str(branch)
+            else:
+                dealer_location = None
             image_urls = self._extract_images(row)
             variant = row.get("Variant") or row.get("variant") or title
             axle = str(row.get("AxleConfiguration") or row.get("drivetrain") or "")
@@ -145,7 +163,7 @@ class WeBuyCarsCollector(BaseCollector):
                     mileage_km=int(mileage) if mileage not in (None, "") else None,
                     colour=str(colour) if colour else None,
                     dealer_name="WeBuyCars",
-                    dealer_location=str(branch) if branch else None,
+                    dealer_location=dealer_location,
                     dealer_stock_number=stock,
                     vin=row.get("VIN") or row.get("vin"),
                     image_urls=image_urls,

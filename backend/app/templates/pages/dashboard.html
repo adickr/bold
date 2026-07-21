@@ -11,7 +11,13 @@
     </form>
     <p class="muted tiny">Runs AutoTrader, Cars.co.za and WeBuyCars collectors (may take 1–3 minutes).</p>
     {% if collected is not none %}
-    <p class="lede">Collection finished: {{ collected }}/{{ total }} sources succeeded. Refresh listings to review.</p>
+    <p class="lede">Collection finished: {{ collected }}/{{ total }} sources succeeded.
+      {% if nationwide_count is defined %}{{ nationwide_count }} active nationwide{% endif %}
+      · {{ stats.active_matching }} match WC · 4x4 · ≤100k km.
+      {% if stats.active_matching == 0 and nationwide_count %}
+        <a href="/listings?sort=price_asc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA</a> while WC stock catches up after re-collect.
+      {% endif %}
+    </p>
     {% endif %}
   </div>
   <div class="hero-meta">

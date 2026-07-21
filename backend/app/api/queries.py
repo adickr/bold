@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
@@ -54,6 +54,38 @@ _WESTERN_CAPE_HINTS = (
     "beaufort west",
     "oudtshoorn",
     "plettenberg",
+    "goodwood",
+    "parow",
+    "tyger valley",
+    "tygervalley",
+    "century city",
+    "woodstock",
+    "observatory",
+    "ottery",
+    "foreshores",
+    "foreshore",
+    "green point",
+    "sea point",
+    "rondebosch",
+    "newlands",
+    "plumstead",
+    "diep river",
+    "tokai",
+    "muizenberg",
+    "strandfontein",
+    "philippi",
+    "mitchells plain",
+    "mitchell's plain",
+    "khayelitsha",
+    "somerset west",
+    "strand",
+    "n1 city",
+    "montague gardens",
+    "killarney",
+    "melkbos",
+    "blouberg",
+    "parklands",
+    "west coast",
 )
 
 
@@ -86,14 +118,21 @@ def location_matches_province(location: str | None, province: str | None) -> boo
 
 
 def _drivetrain_matches(value: str | None, wanted: str) -> bool:
-    if not value:
-        return False
-    left = value.lower().replace(" ", "")
+    """Match drivetrain. For 4x4 preference, keep unclear listings (exclude only 4x2)."""
     right = wanted.lower().replace(" ", "")
+    left = (value or "").lower().replace(" ", "")
     if right in {"4x4", "4wd", "awd"}:
-        return left in {"4x4", "4wd", "awd"} or "4x4" in left
+        if not left:
+            return True
+        if left in {"4x2", "2wd"} or "4x2" in left:
+            return False
+        return left in {"4x4", "4wd", "awd"} or "4x4" in left or "4wd" in left
     if right in {"4x2", "2wd"}:
+        if not left:
+            return False
         return left in {"4x2", "2wd"} or "4x2" in left
+    if not left:
+        return False
     return right in left
 
 
@@ -233,7 +272,13 @@ def filter_vehicles(db: Session, params: VehicleFilterParams) -> list[CanonicalV
     if params.min_mileage is not None:
         stmt = stmt.where(CanonicalVehicle.current_mileage_km >= params.min_mileage)
     if params.max_mileage is not None:
-        stmt = stmt.where(CanonicalVehicle.current_mileage_km <= params.max_mileage)
+        # Keep unknown mileage — search pages often omit it
+        stmt = stmt.where(
+            or_(
+                CanonicalVehicle.current_mileage_km.is_(None),
+                CanonicalVehicle.current_mileage_km <= params.max_mileage,
+            )
+        )
     if params.min_year is not None:
         stmt = stmt.where(CanonicalVehicle.year >= params.min_year)
     if params.max_year is not None:

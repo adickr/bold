@@ -119,6 +119,9 @@ def page_dashboard(
 ):
     stats = dashboard_stats(db)
     vehicles = filter_vehicles(db, default_buyer_filters())[:8]
+    nationwide = filter_vehicles(
+        db, VehicleFilterParams(active_only=True, sort="price_asc")
+    )
     return templates.TemplateResponse(
         request,
         "pages/dashboard.html",
@@ -126,6 +129,7 @@ def page_dashboard(
             "user": user,
             "stats": stats,
             "vehicles": [vehicle_to_dict(v) for v in vehicles],
+            "nationwide_count": len(nationwide),
             "page": "dashboard",
             "collected": collected,
             "total": total,
@@ -177,6 +181,9 @@ def page_listings(
             q=q or None,
         )
     vehicles = filter_vehicles(db, params)
+    nationwide = filter_vehicles(
+        db, VehicleFilterParams(active_only=True, sort="price_asc")
+    )
     return templates.TemplateResponse(
         request,
         "pages/listings.html",
@@ -184,6 +191,7 @@ def page_listings(
             "user": user,
             "vehicles": [vehicle_to_dict(v) for v in vehicles],
             "filters": params.model_dump(),
+            "nationwide_count": len(nationwide),
             "page": "listings",
         },
     )

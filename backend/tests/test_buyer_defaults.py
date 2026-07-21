@@ -10,6 +10,14 @@ from app.config import get_settings
 from app.services.ingestion import IngestionService
 
 
+def test_drivetrain_4x4_keeps_unclear():
+    from app.api.queries import _drivetrain_matches
+
+    assert _drivetrain_matches("4x4", "4x4")
+    assert _drivetrain_matches(None, "4x4")
+    assert not _drivetrain_matches("4x2", "4x4")
+
+
 def test_location_matches_western_cape_towns():
     assert location_matches_province("Brackenfell, Western Cape", "Western Cape")
     assert location_matches_province("Cape Town", "Western Cape")

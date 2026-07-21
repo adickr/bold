@@ -21,6 +21,13 @@ class CarsCoZaCollector(BaseCollector):
     category = "marketplace"
 
     SEARCH_URL = "https://www.cars.co.za/usedcars/Toyota/Fortuner/"
+    SEARCH_URL_WC = "https://www.cars.co.za/usedcars/Western-Cape/Toyota/Fortuner/"
+
+    def search_base_url(self) -> str:
+        preferred = (self.settings.preferred_province or "").strip().lower()
+        if preferred in {"western cape", "wc", "western-cape"}:
+            return self.SEARCH_URL_WC
+        return self.SEARCH_URL
 
     def build_search_params(self) -> dict[str, Any]:
         return {
@@ -29,7 +36,7 @@ class CarsCoZaCollector(BaseCollector):
         }
 
     def search(self) -> list[ListingPayload]:
-        url = f"{self.SEARCH_URL}?{urlencode(self.build_search_params())}"
+        url = f"{self.search_base_url()}?{urlencode(self.build_search_params())}"
         listings: list[ListingPayload] = []
         html = ""
 

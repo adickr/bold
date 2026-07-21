@@ -55,8 +55,24 @@
         </td>
         <td>{{ v.shortlist_status or '—' }}</td>
       </tr>
-      {% else %}
-      <tr><td colspan="13" class="muted">No matching vehicles.</td></tr>
+{% else %}
+      <tr>
+        <td colspan="13">
+          <div class="empty-state">
+            <p class="muted">No vehicles match the current filters.</p>
+            {% if nationwide_count is defined and nationwide_count > 0 %}
+            <p>{{ nationwide_count }} active listing{{ 's' if nationwide_count != 1 else '' }} tracked nationwide — try clearing Province or open all SA.</p>
+            <p>
+              <a class="btn-link" href="/listings?sort=price_asc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA · 4x4 · ≤100k km</a>
+              · <a class="btn-link" href="/listings?sort=price_asc">Show everything</a>
+              · <a class="btn-link" href="/listings">Reset WC defaults</a>
+            </p>
+            {% else %}
+            <p class="muted">Nothing active in the database yet. Run <strong>Collect live listings now</strong> on the dashboard (1–3 minutes), then refresh.</p>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
       {% endfor %}
     </tbody>
   </table>
