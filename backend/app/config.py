@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     make: str = "Toyota"
     model: str = "Fortuner"
     required_drivetrain: str = "4x4"
+    preferred_province: str = "Western Cape"
+    default_sort: str = "price_asc"  # price_asc | deal_score_desc
 
     # Collection intervals (seconds)
     marketplace_interval_seconds: int = 3 * 60 * 60

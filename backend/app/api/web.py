@@ -16,7 +16,12 @@ from app.api.auth import (
     logout_user,
     require_web_user,
 )
-from app.api.queries import dashboard_stats, filter_vehicles, vehicle_to_dict
+from app.api.queries import (
+    dashboard_stats,
+    default_buyer_filters,
+    filter_vehicles,
+    vehicle_to_dict,
+)
 from app.db.session import get_db
 from app.models.entities import CanonicalVehicle, ShortlistEntry
 from app.schemas.listings import (
@@ -113,7 +118,7 @@ def page_dashboard(
     total: int | None = None,
 ):
     stats = dashboard_stats(db)
-    vehicles = filter_vehicles(db, VehicleFilterParams())[:8]
+    vehicles = filter_vehicles(db, default_buyer_filters())[:8]
     return templates.TemplateResponse(
         request,
         "pages/dashboard.html",
@@ -140,28 +145,37 @@ def page_listings(
     variant: str | None = None,
     province: str | None = None,
     dealer: str | None = None,
+    drivetrain: str | None = None,
     min_deal_score: float | None = None,
     has_reduction: bool | None = None,
     new_only: bool | None = None,
     shortlisted: bool | None = None,
     stretch: bool | None = None,
+    sort: str | None = None,
     q: str | None = None,
 ):
-    params = VehicleFilterParams(
-        min_price=min_price,
-        max_price=max_price,
-        max_mileage=max_mileage,
-        min_year=min_year,
-        variant=variant,
-        province=province,
-        dealer=dealer,
-        min_deal_score=min_deal_score,
-        has_reduction=has_reduction,
-        new_only=new_only,
-        shortlisted=shortlisted,
-        stretch=stretch,
-        q=q,
-    )
+    # First visit (no query): buyer defaults. Form submit uses submitted values as-is
+    # so clearing a field (e.g. province) widens the search.
+    if not request.query_params:
+        params = default_buyer_filters()
+    else:
+        params = VehicleFilterParams(
+            min_price=min_price,
+            max_price=max_price,
+            max_mileage=max_mileage,
+            min_year=min_year,
+            variant=variant or None,
+            province=(province.strip() if province else None) or None,
+            dealer=dealer or None,
+            drivetrain=(drivetrain.strip() if drivetrain else None) or None,
+            min_deal_score=min_deal_score,
+            has_reduction=has_reduction,
+            new_only=new_only,
+            shortlisted=shortlisted,
+            stretch=stretch,
+            sort=sort or "price_asc",
+            q=q or None,
+        )
     vehicles = filter_vehicles(db, params)
     return templates.TemplateResponse(
         request,

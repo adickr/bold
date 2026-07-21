@@ -9,9 +9,130 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.entities import CanonicalVehicle, PriceEvent, ShortlistEntry
+from app.config import get_settings
+from app.models.entities import CanonicalVehicle, PriceEvent
 from app.schemas.listings import DashboardStats, VehicleFilterParams
 from app.services.media import absolute_url, source_label
+
+# Towns/areas commonly listed without "Western Cape" in the location string.
+_WESTERN_CAPE_HINTS = (
+    "western cape",
+    "cape town",
+    "stellenbosch",
+    "paarl",
+    "somerset west",
+    "brackenfell",
+    "bellville",
+    "george",
+    "knysna",
+    "mossel bay",
+    "worcester",
+    "strand",
+    "gordons bay",
+    "gordon's bay",
+    "hermanus",
+    "malmesbury",
+    "durbanville",
+    "kuilsriver",
+    "kuils river",
+    "milnerton",
+    "table view",
+    "century city",
+    "observatory",
+    "claremont",
+    "wynberg",
+    "constantia",
+    "fish hoek",
+    "simonstown",
+    "simon's town",
+    "hout bay",
+    "atlantis",
+    "velddrif",
+    "piketberg",
+    "caledon",
+    "swellendam",
+    "beaufort west",
+    "oudtshoorn",
+    "plettenberg",
+)
+
+
+def default_buyer_filters(**overrides: Any) -> VehicleFilterParams:
+    """Defaults for browsing: ≤100k km, 4x4, Western Cape, cheapest first."""
+    settings = get_settings()
+    data: dict[str, Any] = {
+        "max_mileage": settings.max_mileage_km,
+        "drivetrain": settings.required_drivetrain,
+        "province": settings.preferred_province,
+        "sort": settings.default_sort,
+        "active_only": True,
+    }
+    for key, value in overrides.items():
+        if value is not None:
+            data[key] = value
+    return VehicleFilterParams(**data)
+
+
+def location_matches_province(location: str | None, province: str | None) -> bool:
+    if not location or not province:
+        return False
+    loc = location.lower()
+    prov = province.strip().lower()
+    if prov in loc:
+        return True
+    if prov in {"western cape", "wc", "western-cape"}:
+        return any(hint in loc for hint in _WESTERN_CAPE_HINTS)
+    return False
+
+
+def _drivetrain_matches(value: str | None, wanted: str) -> bool:
+    if not value:
+        return False
+    left = value.lower().replace(" ", "")
+    right = wanted.lower().replace(" ", "")
+    if right in {"4x4", "4wd", "awd"}:
+        return left in {"4x4", "4wd", "awd"} or "4x4" in left
+    if right in {"4x2", "2wd"}:
+        return left in {"4x2", "2wd"} or "4x2" in left
+    return right in left
+
+
+def sort_vehicles(vehicles: list[CanonicalVehicle], sort: str) -> list[CanonicalVehicle]:
+    key = (sort or "price_asc").strip().lower()
+    if key == "price_desc":
+        return sorted(
+            vehicles,
+            key=lambda v: (
+                v.current_lowest_price is None,
+                -(v.current_lowest_price or 0),
+            ),
+        )
+    if key == "mileage_asc":
+        return sorted(
+            vehicles,
+            key=lambda v: (
+                v.current_mileage_km is None,
+                v.current_mileage_km or 0,
+            ),
+        )
+    if key == "deal_score_desc":
+        return sorted(
+            vehicles,
+            key=lambda v: (v.deal_score is None, -(v.deal_score or 0)),
+        )
+    if key == "year_desc":
+        return sorted(
+            vehicles,
+            key=lambda v: (v.year is None, -(v.year or 0)),
+        )
+    # Default / price_asc: lowest asking price first
+    return sorted(
+        vehicles,
+        key=lambda v: (
+            v.current_lowest_price is None,
+            v.current_lowest_price or 0,
+        ),
+    )
 
 
 def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
@@ -131,10 +252,17 @@ def filter_vehicles(db: Session, params: VehicleFilterParams) -> list[CanonicalV
         stmt = stmt.where(CanonicalVehicle.variant_normalised.ilike(f"%{params.variant}%"))
     if params.dealer:
         stmt = stmt.where(CanonicalVehicle.primary_dealer.ilike(f"%{params.dealer}%"))
-    if params.province:
-        stmt = stmt.where(CanonicalVehicle.primary_location.ilike(f"%{params.province}%"))
 
-    vehicles = list(db.execute(stmt.order_by(CanonicalVehicle.deal_score.desc().nullslast())).scalars().all())
+    vehicles = list(db.execute(stmt).scalars().all())
+
+    if params.province:
+        vehicles = [
+            v for v in vehicles if location_matches_province(v.primary_location, params.province)
+        ]
+    if params.drivetrain:
+        vehicles = [
+            v for v in vehicles if _drivetrain_matches(v.drivetrain, params.drivetrain)
+        ]
 
     if params.shortlisted:
         vehicles = [v for v in vehicles if v.shortlist_entry is not None]
@@ -161,10 +289,11 @@ def filter_vehicles(db: Session, params: VehicleFilterParams) -> list[CanonicalV
             or q in (v.primary_location or "").lower()
             or q in (v.trim or "").lower()
         ]
-    return vehicles
+    return sort_vehicles(vehicles, params.sort)
 
 
 def dashboard_stats(db: Session) -> DashboardStats:
+    """Spotlights can surface exceptional cars nationwide; counts use buyer defaults."""
     now = datetime.now(timezone.utc)
     today = now - timedelta(hours=24)
     week = now - timedelta(days=7)
@@ -177,10 +306,11 @@ def dashboard_stats(db: Session) -> DashboardStats:
         .scalars()
         .all()
     )
-    prices = [v.current_lowest_price for v in actives if v.current_lowest_price]
+    matching = filter_vehicles(db, default_buyer_filters())
+    prices = [v.current_lowest_price for v in matching if v.current_lowest_price]
     new_today = sum(
         1
-        for v in actives
+        for v in matching
         if v.first_seen_at
         and (
             v.first_seen_at
@@ -198,7 +328,12 @@ def dashboard_stats(db: Session) -> DashboardStats:
     )
 
     def pick(pred):
-        matched = [v for v in actives if pred(v) and v.deal_score is not None]
+        # Prefer buyer-criteria matches; fall back to any active for "awesome" finds
+        matched = [v for v in matching if pred(v) and v.deal_score is not None]
+        if not matched:
+            matched = [v for v in matching if pred(v)]
+        if not matched:
+            matched = [v for v in actives if pred(v) and v.deal_score is not None]
         if not matched:
             matched = [v for v in actives if pred(v)]
         if not matched:
@@ -210,9 +345,10 @@ def dashboard_stats(db: Session) -> DashboardStats:
     best_grs = pick(lambda v: v.trim == "GR-S" or (v.special_edition or "").startswith("GR"))
     best_vx = pick(lambda v: v.trim == "VX")
     motivated = None
-    if actives:
+    pool = matching or list(actives)
+    if pool:
         ranked = sorted(
-            [v for v in actives if v.motivation_score is not None],
+            [v for v in pool if v.motivation_score is not None],
             key=lambda v: v.motivation_score or 0,
             reverse=True,
         )
@@ -220,7 +356,7 @@ def dashboard_stats(db: Session) -> DashboardStats:
             motivated = vehicle_to_dict(ranked[0])
 
     return DashboardStats(
-        active_matching=len(actives),
+        active_matching=len(matching),
         new_today=new_today,
         reductions_this_week=len(reductions),
         median_asking_price=int(median(prices)) if prices else None,

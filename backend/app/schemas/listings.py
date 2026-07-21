@@ -88,6 +88,7 @@ class VehicleFilterParams(BaseModel):
     variant: str | None = None
     province: str | None = None
     dealer: str | None = None
+    drivetrain: str | None = None
     min_deal_score: float | None = None
     min_days: int | None = None
     max_days: int | None = None
@@ -96,6 +97,7 @@ class VehicleFilterParams(BaseModel):
     shortlisted: bool | None = None
     stretch: bool | None = None
     active_only: bool = True
+    sort: str = "price_asc"
     q: str | None = None
 
 

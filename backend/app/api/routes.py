@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select
 
 from app.api.auth import require_user
-from app.api.queries import dashboard_stats, filter_vehicles, vehicle_to_dict
+from app.api.queries import (
+    dashboard_stats,
+    default_buyer_filters,
+    filter_vehicles,
+    vehicle_to_dict,
+)
 from app.db.session import get_db
 from app.models.entities import CanonicalVehicle, CollectorRun
 from app.schemas.listings import (
@@ -46,6 +51,7 @@ def api_vehicles(
     variant: str | None = None,
     province: str | None = None,
     dealer: str | None = None,
+    drivetrain: str | None = None,
     min_deal_score: float | None = None,
     min_days: int | None = None,
     max_days: int | None = None,
@@ -54,29 +60,61 @@ def api_vehicles(
     shortlisted: bool | None = None,
     stretch: bool | None = None,
     active_only: bool = True,
+    sort: str | None = None,
     q: str | None = None,
+    apply_defaults: bool = True,
     db: Session = Depends(get_db),
 ):
-    params = VehicleFilterParams(
-        min_price=min_price,
-        max_price=max_price,
-        min_mileage=min_mileage,
-        max_mileage=max_mileage,
-        min_year=min_year,
-        max_year=max_year,
-        variant=variant,
-        province=province,
-        dealer=dealer,
-        min_deal_score=min_deal_score,
-        min_days=min_days,
-        max_days=max_days,
-        has_reduction=has_reduction,
-        new_only=new_only,
-        shortlisted=shortlisted,
-        stretch=stretch,
-        active_only=active_only,
-        q=q,
-    )
+    """List vehicles. By default applies buyer prefs (≤100k km, 4x4, Western Cape, price asc).
+
+    Pass apply_defaults=false to browse without those constraints, or override any field.
+    """
+    if apply_defaults:
+        params = default_buyer_filters(
+            min_price=min_price,
+            max_price=max_price,
+            min_mileage=min_mileage,
+            max_mileage=max_mileage,
+            min_year=min_year,
+            max_year=max_year,
+            variant=variant,
+            province=province,
+            dealer=dealer,
+            drivetrain=drivetrain,
+            min_deal_score=min_deal_score,
+            min_days=min_days,
+            max_days=max_days,
+            has_reduction=has_reduction,
+            new_only=new_only,
+            shortlisted=shortlisted,
+            stretch=stretch,
+            active_only=active_only,
+            sort=sort,
+            q=q,
+        )
+    else:
+        params = VehicleFilterParams(
+            min_price=min_price,
+            max_price=max_price,
+            min_mileage=min_mileage,
+            max_mileage=max_mileage,
+            min_year=min_year,
+            max_year=max_year,
+            variant=variant,
+            province=province,
+            dealer=dealer,
+            drivetrain=drivetrain,
+            min_deal_score=min_deal_score,
+            min_days=min_days,
+            max_days=max_days,
+            has_reduction=has_reduction,
+            new_only=new_only,
+            shortlisted=shortlisted,
+            stretch=stretch,
+            active_only=active_only,
+            sort=sort or "price_asc",
+            q=q,
+        )
     vehicles = filter_vehicles(db, params)
     return [vehicle_to_dict(v) for v in vehicles]
 
