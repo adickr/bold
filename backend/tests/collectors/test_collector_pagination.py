@@ -15,7 +15,10 @@ def test_autotrader_western_cape_url_includes_province_id():
 
 
 def test_cars_co_za_pagination_param():
-    settings = Settings(preferred_province="Western Cape")
+    settings = Settings(preferred_province="Western Cape", max_mileage_km=100_000)
     c = CarsCoZaCollector(settings=settings)
-    assert "Western-Cape" in c.search_base_url()
-    assert c.build_search_params(page=4)["P"] == 4
+    assert "usedcars" in c.SEARCH_URL
+    params = c.build_search_params(page=4)
+    assert params["P"] == 4
+    assert params["vehicle_axle_config"] == "4X4"
+    assert params["vfs_area"] == "Western Cape"

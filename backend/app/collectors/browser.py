@@ -1,7 +1,8 @@
 """Optional Playwright helpers for JS-rendered marketplace pages.
 
 Used only when normal HTTP parsing is insufficient. Does not bypass CAPTCHAs
-or authentication — it loads public pages in a real browser context.
+or authentication — it loads public pages in a real browser context and waits
+for Cloudflare interstitial pages to clear when possible.
 """
 
 from __future__ import annotations
@@ -27,7 +28,22 @@ def browser_page(*, headless: bool = True) -> Iterator[Any]:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
+        launch_kwargs: dict[str, Any] = {
+            "headless": headless,
+            "args": ["--disable-blink-features=AutomationControlled"],
+        }
+        browser = None
+        for channel in (None, "chrome", "chromium"):
+            try:
+                kwargs = dict(launch_kwargs)
+                if channel:
+                    kwargs["channel"] = channel
+                browser = p.chromium.launch(**kwargs)
+                break
+            except Exception as exc:
+                logger.debug("Playwright launch failed channel=%s: %s", channel, exc)
+        if browser is None:
+            raise RuntimeError("Unable to launch Playwright Chromium")
         context = browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -37,6 +53,9 @@ def browser_page(*, headless: bool = True) -> Iterator[Any]:
             locale="en-ZA",
             viewport={"width": 1440, "height": 1100},
         )
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+        )
         page = context.new_page()
         try:
             yield page
@@ -45,18 +64,40 @@ def browser_page(*, headless: bool = True) -> Iterator[Any]:
             browser.close()
 
 
+def _wait_through_challenge(page: Any, timeout_ms: int = 90000) -> None:
+    """Wait until Cloudflare / bot interstitial clears, if present."""
+    try:
+        page.wait_for_function(
+            """() => {
+              const t = (document.title || '').toLowerCase();
+              if (t.includes('just a moment') || t.includes('attention required')) return false;
+              if (document.querySelector('#challenge-running, #cf-challenge-running')) return false;
+              return true;
+            }""",
+            timeout=timeout_ms,
+        )
+    except Exception:
+        logger.warning("Challenge wait timed out (title=%s)", page.title())
+
+
 def fetch_rendered_html(
-    url: str, *, wait_selector: str | None = None, timeout_ms: int = 60000
+    url: str,
+    *,
+    wait_selector: str | None = None,
+    timeout_ms: int = 90000,
+    wait_through_challenge: bool = False,
 ) -> str:
     with browser_page() as page:
         page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        if wait_through_challenge:
+            _wait_through_challenge(page, timeout_ms=timeout_ms)
         try:
-            page.wait_for_load_state("networkidle", timeout=timeout_ms)
+            page.wait_for_load_state("networkidle", timeout=min(timeout_ms, 45000))
         except Exception:
             logger.warning("networkidle timeout for %s", url)
         if wait_selector:
             try:
-                page.wait_for_selector(wait_selector, timeout=min(timeout_ms, 20000))
+                page.wait_for_selector(wait_selector, timeout=min(timeout_ms, 30000))
             except Exception:
                 logger.warning("Timed out waiting for selector %s on %s", wait_selector, url)
         else:
@@ -71,6 +112,8 @@ def fetch_json_from_responses(
     timeout_ms: int = 90000,
     settle_ms: int = 3000,
     scroll_rounds: int = 8,
+    wait_through_challenge: bool = False,
+    json_only: bool = False,
 ) -> list[Any]:
     """Open a page and capture JSON bodies from matching network responses."""
     captured: list[Any] = []
@@ -83,6 +126,10 @@ def fetch_json_from_responses(
                     return
                 if response.status >= 400:
                     return
+                ctype = (response.headers or {}).get("content-type", "")
+                if json_only and "json" not in ctype and "javascript" not in ctype:
+                    # Still try .json() — some APIs omit content-type
+                    pass
                 data = response.json()
                 captured.append(data)
             except Exception:
@@ -90,6 +137,8 @@ def fetch_json_from_responses(
 
         page.on("response", _on_response)
         page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        if wait_through_challenge:
+            _wait_through_challenge(page, timeout_ms=timeout_ms)
         try:
             page.wait_for_load_state("networkidle", timeout=timeout_ms)
         except Exception:
@@ -99,7 +148,6 @@ def fetch_json_from_responses(
         for _ in range(max(1, scroll_rounds)):
             page.mouse.wheel(0, 4200)
             page.wait_for_timeout(900)
-            # Click common "next / load more" controls if present
             for selector in (
                 "button:has-text('Load more')",
                 "button:has-text('Show more')",

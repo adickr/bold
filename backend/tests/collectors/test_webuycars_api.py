@@ -25,7 +25,8 @@ def test_api_body_uses_q_and_4x4():
     assert body["Model"] == ["Fortuner"]
     assert body["AxleConfiguration"] == ["4X4"]
     assert body["to"] == 24
-    assert body["Province"] == ["Western Cape"]
+    # Nationwide collect — WC browse filter is applied in the UI, not here
+    assert body["Province"] is None
     assert "Provinces" not in body
 
 

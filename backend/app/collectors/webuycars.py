@@ -136,13 +136,10 @@ class WeBuyCarsCollector(BaseCollector):
             "Price_Update_Date_Sort": "",
             "Online_Auction_Date_Sort": "",
             "Online_Auction_In_Progress": "",
+            # Do NOT filter Province here — WeBuyCars WC 4x4 stock is thin;
+            # Western Cape coverage comes mainly from Cars.co.za / AutoTrader.
             "Province": None,
         }
-        preferred = (self.settings.preferred_province or "").strip().lower()
-        if preferred in {"western cape", "wc", "western-cape"}:
-            # Collect WC-first; criteria/browse still apply. Broad national pass
-            # happens via AxleConfiguration-only when WC returns thin stock.
-            body["Province"] = ["Western Cape"]
         return body
 
     def search(self) -> list[ListingPayload]:
@@ -243,79 +240,63 @@ class WeBuyCarsCollector(BaseCollector):
         max_pages = max(1, self.settings.collector_max_pages)
         max_results = max_pages * page_size
 
-        # Pass 1: preferred province (if set). Pass 2: nationwide 4x4 fill.
-        passes: list[dict[str, Any]] = []
-        preferred = (self.settings.preferred_province or "").strip()
-        if preferred:
-            passes.append({"Province": [preferred]})
-        passes.append({"Province": None})  # nationwide top-up
-
         all_listings: list[ListingPayload] = []
         seen: set[str] = set()
-
-        for pass_filters in passes:
-            offset = 0
-            total: int | None = None
-            pages = 0
-            while pages < max_pages and len(seen) < max_results:
-                body = self.build_api_body(offset=offset, size=page_size)
-                body.update(pass_filters)
-                self.throttle()
+        offset = 0
+        total: int | None = None
+        pages = 0
+        while pages < max_pages and len(seen) < max_results:
+            body = self.build_api_body(offset=offset, size=page_size)
+            self.throttle()
+            resp = self.client.post(
+                SEARCH_API,
+                json=body,
+                headers=self._api_headers(pow_token),
+            )
+            if resp.status_code in {401, 403}:
+                pow_token = self.obtain_pow_token()
                 resp = self.client.post(
                     SEARCH_API,
                     json=body,
                     headers=self._api_headers(pow_token),
                 )
-                if resp.status_code in {401, 403}:
-                    # Token expired — refresh once
-                    pow_token = self.obtain_pow_token()
-                    resp = self.client.post(
-                        SEARCH_API,
-                        json=body,
-                        headers=self._api_headers(pow_token),
-                    )
-                resp.raise_for_status()
-                payload = resp.json()
-                if pages == 0:
-                    self.snapshot_raw(
-                        "search_api",
-                        {
-                            "filters": pass_filters,
-                            "total": payload.get("total"),
-                            "sample": (payload.get("data") or [])[:2],
-                        },
-                    )
-                batch = self.parse_api_json(payload)
-                if total is None:
-                    total_obj = payload.get("total") or {}
-                    total = int(total_obj.get("value") or 0) if isinstance(total_obj, dict) else None
-                gained = 0
-                for item in batch:
-                    if item.source_listing_id in seen:
-                        continue
-                    seen.add(item.source_listing_id)
-                    all_listings.append(item)
-                    gained += 1
-                logger.info(
-                    "WeBuyCars API %s offset=%s batch=%s gained=%s unique=%s total=%s",
-                    pass_filters,
-                    offset,
-                    len(batch),
-                    gained,
-                    len(seen),
-                    total,
+            resp.raise_for_status()
+            payload = resp.json()
+            if pages == 0:
+                self.snapshot_raw(
+                    "search_api",
+                    {
+                        "total": payload.get("total"),
+                        "sample": (payload.get("data") or [])[:2],
+                    },
                 )
-                pages += 1
-                if not batch:
-                    break
-                offset += len(batch)
-                if total is not None and offset >= total:
-                    break
-                if len(batch) < page_size:
-                    break
-
-            # If WC pass already returned a healthy set, still do nationwide
-            # top-up so exceptional non-WC stock can surface in spotlights.
+            batch = self.parse_api_json(payload)
+            if total is None:
+                total_obj = payload.get("total") or {}
+                total = int(total_obj.get("value") or 0) if isinstance(total_obj, dict) else None
+            gained = 0
+            for item in batch:
+                if item.source_listing_id in seen:
+                    continue
+                seen.add(item.source_listing_id)
+                all_listings.append(item)
+                gained += 1
+            logger.info(
+                "WeBuyCars API offset=%s batch=%s gained=%s unique=%s total=%s",
+                offset,
+                len(batch),
+                gained,
+                len(seen),
+                total,
+            )
+            pages += 1
+            if not batch:
+                break
+            offset += len(batch)
+            if total is not None and offset >= total:
+                break
+            if len(batch) < page_size:
+                break
 
         return all_listings
 
