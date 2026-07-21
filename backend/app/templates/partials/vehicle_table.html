@@ -1,0 +1,44 @@
+<div class="table-wrap">
+  <table class="listings">
+    <thead>
+      <tr>
+        <th></th>
+        <th>Year</th>
+        <th>Variant</th>
+        <th>Price</th>
+        <th>Mileage</th>
+        <th>Location</th>
+        <th>Dealer</th>
+        <th>Days</th>
+        <th>Reduction</th>
+        <th>Deal</th>
+        <th>Motivation</th>
+        <th>Sources</th>
+        <th>Shortlist</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in vehicles %}
+      <tr>
+        <td class="thumb">
+          {% if v.image %}<img src="{{ v.image }}" alt="" loading="lazy" />{% else %}<span class="ph">—</span>{% endif %}
+        </td>
+        <td>{{ v.year or '—' }}</td>
+        <td><a href="/vehicles/{{ v.id }}">{{ v.variant or 'Fortuner' }}{% if v.is_stretch %} <em class="tag">stretch</em>{% endif %}</a></td>
+        <td>{{ v.price | zar }}</td>
+        <td>{% if v.mileage %}{{ "{:,}".format(v.mileage) }} km{% else %}—{% endif %}</td>
+        <td>{{ v.location or '—' }}</td>
+        <td>{{ v.dealer or '—' }}</td>
+        <td>{{ v.days_tracked }}</td>
+        <td>{% if v.total_reduction %}{{ v.total_reduction | zar }}{% else %}—{% endif %}</td>
+        <td><span class="score">{{ v.deal_score if v.deal_score is not none else '—' }}</span></td>
+        <td>{{ v.motivation_level or '—' }}</td>
+        <td>{{ v.source_count }}</td>
+        <td>{{ v.shortlist_status or '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="13" class="muted">No matching vehicles.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

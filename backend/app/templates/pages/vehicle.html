@@ -1,0 +1,162 @@
+{% extends "partials/base.html" %}
+{% block title %}{{ v.year }} {{ v.variant_normalised }} · Fortuner Agent{% endblock %}
+{% block content %}
+<section class="detail-hero">
+  <div class="detail-copy">
+    <p class="eyebrow">{% if v.is_stretch_candidate %}Stretch candidate · {% endif %}{{ v.drivetrain or 'drivetrain unclear' }}</p>
+    <h1>{{ v.year }} {{ v.variant_normalised or 'Fortuner' }}</h1>
+    <p class="lede">{{ summary.dealer or 'Unknown dealer' }} · {{ summary.location or 'South Africa' }}</p>
+    <div class="price-row">
+      <strong>{{ summary.price | zar }}</strong>
+      <span>lowest ask across {{ summary.source_count }} source{{ 's' if summary.source_count != 1 else '' }}</span>
+    </div>
+    <div class="chip-row">
+      <span>Deal {{ summary.deal_score if summary.deal_score is not none else '—' }}/100 <i>(inferred)</i></span>
+      <span>Motivation {{ summary.motivation_level or '—' }} <i>(estimate)</i></span>
+      <span>{{ summary.days_tracked }} days tracked</span>
+      {% if summary.total_reduction %}<span>−{{ summary.total_reduction | zar }} total</span>{% endif %}
+    </div>
+  </div>
+  <div class="detail-media">
+    {% if summary.image %}
+      <img src="{{ summary.image }}" alt="Listing photo" />
+    {% else %}
+      <div class="media-fallback">No image</div>
+    {% endif %}
+  </div>
+</section>
+
+<div class="detail-grid">
+  <section>
+    <h2>Sources</h2>
+    <ul class="source-list">
+      {% for s in v.source_listings %}
+      <li>
+        <a href="{{ s.url }}" target="_blank" rel="noreferrer">{{ s.source }}</a>
+        · {{ s.price_zar | zar }} · {{ s.listing_status }}
+        <div class="muted">{{ s.title }}</div>
+        <div class="muted tiny">Raw variant preserved: {{ s.variant_raw }}</div>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section>
+    <h2>Price history</h2>
+    <ol class="timeline">
+      {% for e in v.price_events|sort(attribute='observed_at') %}
+      <li>
+        <time>{{ e.observed_at }}</time>
+        {% if e.old_price_zar is not none %}
+          {{ e.old_price_zar | zar }} → {{ e.new_price_zar | zar }}
+          ({{ e.change_zar | zar }})
+        {% else %}
+          Initial {{ e.new_price_zar | zar }}
+        {% endif %}
+        <span class="muted">{{ e.source }} · {{ e.note }}</span>
+      </li>
+      {% else %}
+      <li class="muted">No price events yet.</li>
+      {% endfor %}
+    </ol>
+    <p class="muted tiny">Original {{ v.original_price | zar }} · Lowest {{ v.lowest_observed_price | zar }} · Current {{ v.current_lowest_price | zar }}</p>
+  </section>
+
+  <section>
+    <h2>Deal score</h2>
+    {% if v.deal_score_breakdown %}
+    <ul class="score-break">
+      {% for k, val in v.deal_score_breakdown.items() if k not in ['note', 'inferred'] %}
+      <li><span>{{ k.replace('_', ' ') }}</span><strong>{{ val }}</strong></li>
+      {% endfor %}
+    </ul>
+    <p class="muted tiny">{{ v.deal_score_breakdown.note }}</p>
+    {% else %}<p class="muted">Not scored yet.</p>{% endif %}
+  </section>
+
+  <section>
+    <h2>Motivation estimate</h2>
+    {% if v.motivation_breakdown %}
+    <p><strong>{{ v.motivation_level }}</strong> ({{ v.motivation_score }})</p>
+    <ul>
+      {% for r in v.motivation_breakdown.reasons %}
+      <li>{{ r.replace('_', ' ') }}</li>
+      {% endfor %}
+    </ul>
+    <p class="muted tiny">{{ v.motivation_breakdown.note }}</p>
+    {% else %}<p class="muted">No estimate yet.</p>{% endif %}
+  </section>
+
+  <section>
+    <h2>Comparables</h2>
+    {% if v.comparable_stats %}
+    <ul class="score-break">
+      <li><span>Comparable listings</span><strong>{{ v.comparable_stats.comparable_count }}</strong></li>
+      <li><span>Median ask</span><strong>{{ v.comparable_stats.median_price | zar }}</strong></li>
+      <li><span>Diff from median</span><strong>{{ v.comparable_stats.diff_from_median | zar if v.comparable_stats.diff_from_median is defined else '—' }}</strong></li>
+      <li><span>Price percentile</span><strong>{{ v.comparable_stats.price_percentile if v.comparable_stats.price_percentile is defined else '—' }}</strong></li>
+    </ul>
+    <p class="muted tiny">{{ v.comparable_stats.disclaimer }}</p>
+    {% else %}<p class="muted">Insufficient comps.</p>{% endif %}
+  </section>
+
+  <section>
+    <h2>Duplicate evidence</h2>
+    {% if v.match_evidence %}
+    <ul>
+      {% for m in v.match_evidence %}
+      <li>Score {{ m.score }} · {{ m.confidence }}{% if m.is_manual %} (manual){% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">No cross-site matches recorded.</p>{% endif %}
+    {% if v.risk_flags %}
+    <p class="risk">Risk flags: {{ v.risk_flags | join(', ') }}</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="panel">
+  <h2>Shortlist & notes</h2>
+  {% if not v.shortlist_entry %}
+  <form method="post" action="/vehicles/{{ v.id }}/shortlist" class="stack-form">
+    <label>Status
+      <select name="status">
+        <option value="watching">Watching</option>
+        <option value="interested">Interested</option>
+      </select>
+    </label>
+    <label>Notes <textarea name="notes" rows="3"></textarea></label>
+    <button type="submit">Add to shortlist</button>
+  </form>
+  {% else %}
+  <form method="post" action="/shortlist/{{ v.shortlist_entry.id }}/update" class="stack-form">
+    <label>Status
+      <select name="status">
+        {% for s in ['watching','interested','dealer_contacted','viewing_scheduled','negotiating','rejected','sold','purchased'] %}
+        <option value="{{ s }}" {% if v.shortlist_entry.status == s %}selected{% endif %}>{{ s.replace('_',' ') }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Interest (1–5) <input type="number" min="1" max="5" name="interest_level" value="{{ v.shortlist_entry.interest_level }}" /></label>
+    <label>Notes <textarea name="notes" rows="3">{{ v.shortlist_entry.notes or '' }}</textarea></label>
+    <label>Offered price <input type="number" name="offered_price_zar" value="{{ v.shortlist_entry.offered_price_zar or '' }}" /></label>
+    <label>Dealer response <textarea name="dealer_response" rows="2">{{ v.shortlist_entry.dealer_response or '' }}</textarea></label>
+    <label>Rejection reason <input type="text" name="rejection_reason" value="{{ v.shortlist_entry.rejection_reason or '' }}" /></label>
+    <button type="submit">Save</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Dealer message draft</h2>
+  <p class="muted">Generated for editing only — never sent automatically.</p>
+  <textarea id="draft-message" rows="8" readonly>{{ draft }}</textarea>
+  <div class="actions">
+    <button type="button" data-copy="#draft-message">Copy message</button>
+    <form method="post" action="/vehicles/{{ v.id }}/draft" class="inline-form">
+      <input type="number" name="preferred_offer_zar" placeholder="Preferred offer" />
+      <button type="submit">Regenerate</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

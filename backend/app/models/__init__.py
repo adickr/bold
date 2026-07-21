@@ -1,0 +1,33 @@
+from app.models.entities import (
+    AlertLog,
+    AuditLog,
+    CanonicalVehicle,
+    CollectorRun,
+    DuplicateMatchEvidence,
+    ListingObservation,
+    ListingStatus,
+    MarketSnapshot,
+    MatchConfidence,
+    MotivationLevel,
+    PriceEvent,
+    ShortlistEntry,
+    ShortlistStatus,
+    SourceListing,
+)
+
+__all__ = [
+    "AlertLog",
+    "AuditLog",
+    "CanonicalVehicle",
+    "CollectorRun",
+    "DuplicateMatchEvidence",
+    "ListingObservation",
+    "ListingStatus",
+    "MarketSnapshot",
+    "MatchConfidence",
+    "MotivationLevel",
+    "PriceEvent",
+    "ShortlistEntry",
+    "ShortlistStatus",
+    "SourceListing",
+]

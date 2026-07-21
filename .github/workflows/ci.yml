@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run tests
+        env:
+          APP_ENV: test
+          ENABLE_SCHEDULER: "false"
+          COLLECTOR_MODE: fixture
+          DATABASE_URL: sqlite://
+        run: PYTHONPATH=. pytest -q

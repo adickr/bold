@@ -1,0 +1,143 @@
+"""Weighted duplicate matching across source listings."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from rapidfuzz import fuzz
+
+from app.config import Settings, get_settings
+from app.models.entities import MatchConfidence, SourceListing
+
+
+@dataclass
+class MatchResult:
+    score: float
+    confidence: str
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+
+def _norm_phone(phone: str | None) -> str | None:
+    if not phone:
+        return None
+    digits = "".join(c for c in phone if c.isdigit())
+    return digits[-9:] if len(digits) >= 9 else digits or None
+
+
+def _norm_str(value: str | None) -> str | None:
+    if not value:
+        return None
+    return " ".join(value.lower().split())
+
+
+def _phash_similarity(a: list[Any] | None, b: list[Any] | None) -> float | None:
+    if not a or not b:
+        return None
+    set_a, set_b = set(map(str, a)), set(map(str, b))
+    if not set_a or not set_b:
+        return None
+    overlap = len(set_a & set_b) / max(len(set_a | set_b), 1)
+    return overlap
+
+
+def score_pair(
+    a: SourceListing, b: SourceListing, settings: Settings | None = None
+) -> MatchResult:
+    settings = settings or get_settings()
+    score = 0.0
+    evidence: dict[str, Any] = {"signals": []}
+
+    def add(points: float, signal: str) -> None:
+        nonlocal score
+        score += points
+        evidence["signals"].append({"signal": signal, "points": points})
+
+    if a.vin and b.vin and a.vin.upper() == b.vin.upper():
+        add(100, "same_vin")
+    if a.registration and b.registration and a.registration.upper() == b.registration.upper():
+        add(100, "same_registration")
+    if (
+        a.dealer_stock_number
+        and b.dealer_stock_number
+        and a.dealer_stock_number.upper() == b.dealer_stock_number.upper()
+    ):
+        add(95, "same_stock_number")
+
+    img_sim = _phash_similarity(a.image_phashes, b.image_phashes)
+    if img_sim is not None and img_sim >= 0.7:
+        add(80 * img_sim, "near_identical_images")
+    elif a.image_urls and b.image_urls:
+        url_overlap = len(set(a.image_urls) & set(b.image_urls))
+        if url_overlap >= 2:
+            add(80, "identical_image_urls")
+        elif url_overlap == 1:
+            add(40, "shared_image_url")
+
+    dealer_a, dealer_b = _norm_str(a.dealer_name), _norm_str(b.dealer_name)
+    if dealer_a and dealer_b and dealer_a == dealer_b:
+        if a.mileage_km is not None and a.mileage_km == b.mileage_km:
+            add(65, "same_dealer_exact_mileage")
+        else:
+            add(20, "same_dealer")
+    elif dealer_a and dealer_b and dealer_a != dealer_b:
+        add(-20, "different_dealer")
+
+    if a.year and b.year and a.year == b.year:
+        if a.variant_normalised and b.variant_normalised:
+            if fuzz.token_set_ratio(a.variant_normalised, b.variant_normalised) >= 85:
+                add(25, "same_year_and_variant")
+            else:
+                add(10, "same_year")
+        else:
+            add(10, "same_year")
+
+    colour_a, colour_b = _norm_str(a.colour), _norm_str(b.colour)
+    if colour_a and colour_b:
+        if colour_a == colour_b:
+            add(10, "same_colour")
+        else:
+            add(-30, "conflicting_colour")
+
+    if a.mileage_km is not None and b.mileage_km is not None:
+        delta = abs(a.mileage_km - b.mileage_km)
+        if delta <= 100:
+            add(15, "mileage_within_100")
+        elif delta <= 1000:
+            add(5, "mileage_within_1000")
+
+    if a.price_zar is not None and b.price_zar is not None:
+        if abs(a.price_zar - b.price_zar) <= 10_000:
+            add(10, "price_within_10000")
+
+    phone_a, phone_b = _norm_phone(a.dealer_phone), _norm_phone(b.dealer_phone)
+    if phone_a and phone_b and phone_a == phone_b:
+        add(15, "same_contact_number")
+
+    if a.drivetrain and b.drivetrain and a.drivetrain != b.drivetrain:
+        add(-100, "conflicting_drivetrain")
+
+    if a.description and b.description:
+        ratio = fuzz.token_set_ratio(a.description[:500], b.description[:500])
+        if ratio >= 90:
+            add(15, "similar_description")
+
+    # Clamp
+    score = max(0.0, min(score, 100.0))
+    if score >= settings.dedup_certain:
+        confidence = MatchConfidence.CERTAIN.value
+    elif score >= settings.dedup_probable:
+        confidence = MatchConfidence.PROBABLE.value
+    elif score >= settings.dedup_possible:
+        confidence = MatchConfidence.POSSIBLE.value
+    else:
+        confidence = MatchConfidence.SEPARATE.value
+
+    evidence["score"] = score
+    evidence["confidence"] = confidence
+    return MatchResult(score=score, confidence=confidence, evidence=evidence)
+
+
+def should_auto_merge(result: MatchResult, settings: Settings | None = None) -> bool:
+    settings = settings or get_settings()
+    return result.score >= settings.dedup_probable

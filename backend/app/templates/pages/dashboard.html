@@ -1,0 +1,64 @@
+{% extends "partials/base.html" %}
+{% block title %}Dashboard · Fortuner Agent{% endblock %}
+{% block content %}
+<section class="hero-panel">
+  <div>
+    <p class="eyebrow">South African used market</p>
+    <h1>Toyota Fortuner 4x4 watch</h1>
+    <p class="lede">Cross-site history, price moves, and deal signals — not another classifieds site.</p>
+  </div>
+  <div class="hero-meta">
+    <div><span>Active</span><strong>{{ stats.active_matching }}</strong></div>
+    <div><span>New today</span><strong>{{ stats.new_today }}</strong></div>
+    <div><span>Cuts this week</span><strong>{{ stats.reductions_this_week }}</strong></div>
+    <div><span>Median ask</span><strong>{{ stats.median_asking_price | zar }}</strong></div>
+  </div>
+</section>
+
+<section class="spotlight-grid">
+  <article>
+    <h2>Top deal</h2>
+    {% if stats.top_deal %}
+      <a href="/vehicles/{{ stats.top_deal.id }}">
+        <p class="spot-title">{{ stats.top_deal.year }} {{ stats.top_deal.variant }}</p>
+        <p class="spot-price">{{ stats.top_deal.price | zar }} · score {{ stats.top_deal.deal_score }}</p>
+      </a>
+    {% else %}<p class="muted">No vehicles yet — run collectors.</p>{% endif %}
+  </article>
+  <article>
+    <h2>Best GR-S</h2>
+    {% if stats.best_grs %}
+      <a href="/vehicles/{{ stats.best_grs.id }}">
+        <p class="spot-title">{{ stats.best_grs.year }} {{ stats.best_grs.variant }}</p>
+        <p class="spot-price">{{ stats.best_grs.price | zar }}</p>
+      </a>
+    {% else %}<p class="muted">None tracked</p>{% endif %}
+  </article>
+  <article>
+    <h2>Best VX</h2>
+    {% if stats.best_vx %}
+      <a href="/vehicles/{{ stats.best_vx.id }}">
+        <p class="spot-title">{{ stats.best_vx.year }} {{ stats.best_vx.variant }}</p>
+        <p class="spot-price">{{ stats.best_vx.price | zar }}</p>
+      </a>
+    {% else %}<p class="muted">None tracked</p>{% endif %}
+  </article>
+  <article>
+    <h2>Most motivated</h2>
+    {% if stats.most_motivated %}
+      <a href="/vehicles/{{ stats.most_motivated.id }}">
+        <p class="spot-title">{{ stats.most_motivated.year }} {{ stats.most_motivated.variant }}</p>
+        <p class="spot-price">{{ stats.most_motivated.motivation_level }} · {{ stats.most_motivated.price | zar }}</p>
+      </a>
+    {% else %}<p class="muted">None tracked</p>{% endif %}
+  </article>
+</section>
+
+<section>
+  <div class="section-head">
+    <h2>Recent matching vehicles</h2>
+    <a class="text-link" href="/listings">View all</a>
+  </div>
+  {% include "partials/vehicle_table.html" %}
+</section>
+{% endblock %}

@@ -1,0 +1,103 @@
+"""Hard / stretch / negative criteria evaluation."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from app.config import Settings, get_settings
+from app.schemas.listings import ListingPayload, VariantInfo
+from app.services.normalise import normalise_variant
+
+
+NEGATIVE_PATTERNS = [
+    (r"accident|rebuilt|write[\s-]?off|salvage", "accident_or_rebuilt"),
+    (r"ecu\s*tun|remap|chipped|stage\s*[123]", "engine_modification"),
+    (r"lifted|lift\s*kit|air\s*suspension\s*mod", "suspension_modified"),
+    (r"no\s*service\s*history|service\s*history\s*missing", "missing_service_history"),
+    (r"stock\s*photo|catalogue\s*image", "stock_photographs"),
+]
+
+
+@dataclass
+class CriteriaResult:
+    accepted: bool
+    is_stretch: bool = False
+    reasons: list[str] = field(default_factory=list)
+    risk_flags: list[str] = field(default_factory=list)
+    variant: VariantInfo | None = None
+
+
+def evaluate_listing(
+    listing: ListingPayload, settings: Settings | None = None
+) -> CriteriaResult:
+    settings = settings or get_settings()
+    variant = normalise_variant(
+        title=listing.title,
+        variant_raw=listing.variant_raw,
+        description=listing.description,
+        year=listing.year,
+        colour=listing.colour,
+        drivetrain_hint=listing.drivetrain,
+        transmission_hint=listing.transmission,
+        fuel_hint=listing.fuel_type,
+    )
+
+    reasons: list[str] = []
+    risks: list[str] = []
+
+    make_ok = (listing.make or "").lower() == settings.make.lower()
+    model_ok = "fortuner" in (listing.model or listing.title or "").lower()
+    if not make_ok or not model_ok:
+        return CriteriaResult(False, reasons=["not_fortuner"], variant=variant)
+
+    drivetrain = variant.drivetrain or listing.drivetrain
+    if drivetrain == "4x2":
+        risks.append("4x2_drivetrain")
+        return CriteriaResult(False, reasons=["4x2_excluded"], risk_flags=risks, variant=variant)
+
+    # If drivetrain unknown, keep but flag for review (many search pages omit it)
+    if drivetrain is None:
+        risks.append("drivetrain_unclear")
+    elif drivetrain != "4x4":
+        return CriteriaResult(False, reasons=["non_4x4"], risk_flags=risks, variant=variant)
+
+    price = listing.price_zar
+    mileage = listing.mileage_km
+    is_stretch = False
+
+    if price is None:
+        risks.append("missing_price")
+    elif price > settings.stretch_price_zar:
+        return CriteriaResult(False, reasons=["price_too_high"], variant=variant)
+    elif price > settings.max_price_zar:
+        is_stretch = True
+        reasons.append("stretch_price")
+
+    if mileage is None:
+        risks.append("missing_mileage")
+    elif mileage > settings.stretch_mileage_km:
+        return CriteriaResult(False, reasons=["mileage_too_high"], variant=variant)
+    elif mileage > settings.max_mileage_km:
+        is_stretch = True
+        reasons.append("stretch_mileage")
+
+    # High-spec stretch justification
+    if is_stretch and (variant.trim in {"GR-S", "VX"} or variant.special_edition):
+        reasons.append("stretch_desirable_spec")
+
+    blob = " ".join(filter(None, [listing.title, listing.description, listing.variant_raw]))
+    for pattern, flag in NEGATIVE_PATTERNS:
+        if re.search(pattern, blob, re.I):
+            risks.append(flag)
+
+    if not listing.dealer_name and not listing.dealer_phone:
+        risks.append("missing_dealer_info")
+
+    return CriteriaResult(
+        accepted=True,
+        is_stretch=is_stretch,
+        reasons=reasons,
+        risk_flags=risks,
+        variant=variant,
+    )
