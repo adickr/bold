@@ -27,6 +27,9 @@ from app.schemas.listings import (
 )
 from app.services.shortlist import ShortlistService, draft_dealer_message
 
+from app.workers.scheduler import run_all_collectors
+
+
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[1] / "templates"))
 router = APIRouter()
 
@@ -38,6 +41,21 @@ def _fmt_zar(value: int | None) -> str:
 
 
 templates.env.filters["zar"] = _fmt_zar
+
+
+@router.post("/collect")
+def page_collect(user: str = Depends(require_web_user)):
+    """Trigger a live collection run from the dashboard."""
+    import os
+
+    from app.config import get_settings
+
+    os.environ["COLLECTOR_MODE"] = "live"
+    os.environ["USE_PLAYWRIGHT"] = "true"
+    get_settings.cache_clear()
+    results = run_all_collectors()
+    ok = sum(1 for r in results if r.get("success"))
+    return RedirectResponse(f"/?collected={ok}&total={len(results)}", status_code=303)
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -88,7 +106,11 @@ def do_logout(request: Request):
 
 @router.get("/", response_class=HTMLResponse)
 def page_dashboard(
-    request: Request, db: Session = Depends(get_db), user: str = Depends(require_web_user)
+    request: Request,
+    db: Session = Depends(get_db),
+    user: str = Depends(require_web_user),
+    collected: int | None = None,
+    total: int | None = None,
 ):
     stats = dashboard_stats(db)
     vehicles = filter_vehicles(db, VehicleFilterParams())[:8]
@@ -100,6 +122,8 @@ def page_dashboard(
             "stats": stats,
             "vehicles": [vehicle_to_dict(v) for v in vehicles],
             "page": "dashboard",
+            "collected": collected,
+            "total": total,
         },
     )
 

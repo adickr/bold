@@ -46,13 +46,36 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 Open **http://127.0.0.1:8000/login** — default login `buyer` / `fortuner`.
 
-If the page does not load, check the server is up:
+## Live data collection
+
+Sites are JS-heavy / bot-protected, so live mode uses Playwright (real Chromium).
 
 ```bash
-curl -s http://127.0.0.1:8000/health
+cd ~/bold
+git pull origin cursor/fortuner-buying-agent-f5cc
+cd backend
+source .venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+
+# one-shot live ingest (WeBuyCars works; others may still be blocked)
+export PYTHONPATH=.
+export COLLECTOR_MODE=live
+export USE_PLAYWRIGHT=true
+export ENABLE_SCHEDULER=false
+python scripts/collect_live.py
+
+# then restart the app
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-You should see `{"status":"ok",...}`.
+Or click **Collect live listings now** on the dashboard after restarting with the updated code.
+
+Notes:
+- Keep volume low; this is a private tool
+- Listings outside 4x4 / R725k / ~110k km are filtered out
+- Asking prices only — not sold prices
+
 
 ## Docker
 

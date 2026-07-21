@@ -71,10 +71,13 @@ class Settings(BaseSettings):
 
     # Collector behaviour
     collector_mode: Literal["live", "fixture", "hybrid"] = "fixture"
-    request_delay_seconds: float = 2.0
-    request_timeout_seconds: float = 30.0
+    use_playwright: bool = True
+    request_delay_seconds: float = 2.5
+    request_timeout_seconds: float = 45.0
     user_agent: str = (
-        "FortunerBuyingAgent/1.0 (+private research; respectful low-volume)"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36"
     )
     enable_scheduler: bool = False
 
