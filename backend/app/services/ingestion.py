@@ -723,13 +723,10 @@ class IngestionService:
             in {ListingStatus.ACTIVE.value, ListingStatus.RELISTED.value}
             for x in linked
         )
-        # Prefer richest listing for display fields
+        # Prefer cheapest active listing for display (trim does not win)
         primary = sorted(
             active_linked or linked,
-            key=lambda x: (
-                0 if x.trim in {"GR-S", "VX"} else 1,
-                x.price_zar or 10**9,
-            ),
+            key=lambda x: (x.price_zar or 10**9, x.id or 0),
         )[0]
         vehicle.year = vehicle.year or primary.year
         vehicle.variant_normalised = primary.variant_normalised or vehicle.variant_normalised

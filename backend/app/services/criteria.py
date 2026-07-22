@@ -91,10 +91,7 @@ def evaluate_listing(
         is_stretch = True
         reasons.append("stretch_mileage")
 
-    # High-spec stretch justification
-    if is_stretch and (variant.trim in {"GR-S", "VX"} or variant.special_edition):
-        reasons.append("stretch_desirable_spec")
-
+    # Stretch is price/mileage only — VX / GR-S do not justify over-budget
     blob = " ".join(filter(None, [listing.title, listing.description, listing.variant_raw]))
     for pattern, flag in NEGATIVE_PATTERNS:
         if re.search(pattern, blob, re.I):

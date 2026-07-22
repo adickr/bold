@@ -7,7 +7,6 @@ from typing import Any
 
 from app.config import Settings, get_settings
 from app.models.entities import CanonicalVehicle, MotivationLevel
-from app.services.normalise import TRIM_RANK
 
 
 def _days_between(start: datetime | None, end: datetime | None = None) -> int:
@@ -30,7 +29,7 @@ def compute_deal_score(
     settings = settings or get_settings()
     breakdown: dict[str, Any] = {}
 
-    # Price value (30)
+    # Price value (30) — below comparable median scores higher
     price = vehicle.current_lowest_price
     median = comparable_median or vehicle.comparable_stats and vehicle.comparable_stats.get(
         "median_price"
@@ -44,19 +43,22 @@ def compute_deal_score(
         price_score = settings.score_weight_price * 0.4
     breakdown["price_value"] = round(price_score, 1)
 
-    # Spec desirability (20)
-    rank = TRIM_RANK.get(vehicle.trim or "", 40)
-    if rank <= 1:
-        spec_score = settings.score_weight_spec
-    elif rank <= 2:
-        spec_score = settings.score_weight_spec * 0.95
-    elif rank <= 4:
-        spec_score = settings.score_weight_spec * 0.7
-    else:
-        spec_score = settings.score_weight_spec * 0.45
-    if vehicle.special_edition:
-        spec_score = min(settings.score_weight_spec, spec_score + 1)
-    breakdown["specification"] = round(spec_score, 1)
+    # Completeness (20) — trim-neutral. VX / GR-S do not score higher.
+    # Points reflect known facts (year, mileage, dealer), not desirability.
+    known = 0
+    if vehicle.year:
+        known += 1
+    if vehicle.current_mileage_km is not None:
+        known += 1
+    if vehicle.current_lowest_price is not None:
+        known += 1
+    if vehicle.primary_dealer or vehicle.primary_location:
+        known += 1
+    if vehicle.engine or vehicle.variant_normalised:
+        known += 1
+    completeness = known / 5.0
+    spec_score = settings.score_weight_spec * (0.55 + 0.45 * completeness)
+    breakdown["completeness"] = round(spec_score, 1)
 
     # Mileage vs age (15)
     mileage = vehicle.current_mileage_km
@@ -133,7 +135,7 @@ def compute_deal_score(
 
     total = (
         breakdown["price_value"]
-        + breakdown["specification"]
+        + breakdown["completeness"]
         + breakdown["mileage"]
         + breakdown["reduction_history"]
         + breakdown["time_on_market"]
@@ -143,7 +145,10 @@ def compute_deal_score(
     total = max(0.0, min(100.0, round(total, 1)))
     breakdown["total"] = total
     breakdown["inferred"] = True
-    breakdown["note"] = "Score is inferred from asking-price listings, not confirmed sales."
+    breakdown["note"] = (
+        "Score is inferred from asking-price listings, not confirmed sales. "
+        "Trim (VX / GR-S / etc.) does not boost the score."
+    )
     return total, breakdown
 
 
