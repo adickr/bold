@@ -1,11 +1,14 @@
 """Cars.co.za collector.
 
-Uses the same filtered search URL shape as the live site, e.g.:
+Uses the same filtered search URL as the live 4x4 board, e.g.:
 
 https://www.cars.co.za/usedcars/?make_model_variant=Toyota[Fortuner]
   &sort=sort_rank&price_type=listing_price
-  &vfs_mileage=0-99999&vfs_area=Western%20Cape
+  &vfs_area=Western%20Cape&vfs_mileage=0-99999
   &vehicle_axle_config=4X4&P=1
+
+Do NOT use the /usedcars/Western-Cape/Toyota/Fortuner/ SEO path — it does
+not reliably keep the axle filter and leaks 4x2 / Raised Body stock.
 
 Scrapes **search listing cards only** (price, km, year, location, detail href).
 Never opens individual vehicle detail pages — that is unnecessary and multiplies
@@ -53,25 +56,21 @@ class CarsCoZaCollector(BaseCollector):
     category = "marketplace"
 
     SEARCH_URL = "https://www.cars.co.za/usedcars/"
-    # Path-shaped SEO URL (often lighter CF / same results as query filters)
-    SEARCH_PATH_WC = "https://www.cars.co.za/usedcars/Western-Cape/Toyota/Fortuner/"
     HOME_URL = "https://www.cars.co.za/"
 
-    def build_search_params(self, page: int = 1, *, path_mode: bool = False) -> dict[str, Any]:
-        # Match the site's own filter query string (see user WC 4x4 ≤100k URL)
+    def build_search_params(self, page: int = 1) -> dict[str, Any]:
+        """Exact filter set from the live WC · 4x4 · ≤100k Fortuner board."""
         mileage_hi = max(0, int(self.settings.max_mileage_km) - 1)
+        preferred = (self.settings.preferred_province or "").strip() or "Western Cape"
         params: dict[str, Any] = {
-            "sort": "price_asc",
+            "make_model_variant": "Toyota[Fortuner]",
+            "sort": "sort_rank",
             "price_type": "listing_price",
+            "vfs_area": preferred,
             "vfs_mileage": f"0-{mileage_hi}",
             "vehicle_axle_config": "4X4",
             "P": page,
         }
-        if not path_mode:
-            params["make_model_variant"] = "Toyota[Fortuner]"
-            preferred = (self.settings.preferred_province or "").strip()
-            if preferred:
-                params["vfs_area"] = preferred
         if self.settings.enforce_max_price:
             params["price_to"] = self.settings.stretch_price_zar
         return params
@@ -80,15 +79,8 @@ class CarsCoZaCollector(BaseCollector):
         return f"{self.SEARCH_URL}?{urlencode(self.build_search_params(page))}"
 
     def search_urls(self, page: int = 1) -> list[str]:
-        """Prefer path URL for WC, then query-string form as fallback."""
-        urls: list[str] = []
-        preferred = (self.settings.preferred_province or "").strip().lower()
-        if preferred in {"western cape", "wc", "western-cape"}:
-            urls.append(
-                f"{self.SEARCH_PATH_WC}?{urlencode(self.build_search_params(page, path_mode=True))}"
-            )
-        urls.append(self.search_url(page))
-        return urls
+        """Only the query-string 4x4 board — never the SEO path that leaks 4x2s."""
+        return [self.search_url(page)]
 
     def search(self) -> list[ListingPayload]:
         if playwright_available() and self.settings.use_playwright:
@@ -148,8 +140,8 @@ class CarsCoZaCollector(BaseCollector):
 
             page.on("response", _on_response)
 
-            # Single entry URL only — trying a second shape re-prompts Cloudflare
-            entry_url = self.search_urls(1)[0]
+            # Single entry URL only — the live query-string 4x4 board (not SEO path)
+            entry_url = self.search_url(1)
             logger.info(
                 "Cars.co.za: one search listing page (cards only): %s",
                 entry_url,
@@ -322,24 +314,30 @@ class CarsCoZaCollector(BaseCollector):
         return None
 
     def _annotate(self, listings: list[ListingPayload]) -> list[ListingPayload]:
-        """Fill location gaps; only set drivetrain when URL/title is explicit."""
+        """Keep only cards with an explicit 4x4 signal in URL/title.
+
+        The live axle-filtered board should already be 4x4-only; this is the
+        hard gate so SEO-path leaks / Raised Body / mHev demos never land.
+        """
         preferred = (self.settings.preferred_province or "").strip() or None
         out: list[ListingPayload] = []
+        dropped = 0
         for item in listings:
             data = item.model_dump()
             detected = self._drivetrain_from_text(
                 data.get("url"), data.get("title"), data.get("variant_raw")
             )
-            if detected:
-                data["drivetrain"] = detected
-            elif data.get("drivetrain") == "4x4":
-                # Drop search-scope assumption when the card never says 4x4
-                data["drivetrain"] = None
+            if detected != "4x4":
+                dropped += 1
+                continue
+            data["drivetrain"] = "4x4"
             if preferred and not data.get("dealer_location"):
                 data["dealer_location"] = preferred
             elif preferred and preferred.lower() not in (data.get("dealer_location") or "").lower():
                 data["dealer_location"] = f"{data.get('dealer_location')}, {preferred}".strip(", ")
             out.append(ListingPayload.model_validate(data))
+        if dropped:
+            logger.info("Cars.co.za: dropped %s non-explicit-4x4 card(s)", dropped)
         return out
 
     def parse_api_json(self, data: Any) -> list[ListingPayload]:
