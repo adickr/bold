@@ -58,6 +58,7 @@
         {% if lf and lf.has_changes %}
           {% set new_items = (lf.changes.new if lf.changes else []) or [] %}
           {% set cut_items = (lf.changes.price_cuts if lf.changes else []) or [] %}
+          {% set update_items = (lf.changes.updates if lf.changes else []) or [] %}
           {% if new_items %}
           <section>
             <h3>New listings <span class="mono">{{ lf.new }}</span></h3>
@@ -94,10 +95,25 @@
             </ul>
           </section>
           {% endif %}
-          {% if lf.updated and not new_items and not cut_items %}
-          <p class="muted">{{ lf.updated }} listing{{ 's' if lf.updated != 1 else '' }} re-checked with no new stock or price cuts to list.</p>
-          {% elif lf.updated and (new_items or cut_items) %}
-          <p class="muted tiny">Also {{ lf.updated }} existing listing{{ 's' if lf.updated != 1 else '' }} re-checked without a price move.</p>
+          {% if update_items %}
+          <section>
+            <h3>Updated listings <span class="mono">{{ update_items|length }}{% if lf.updated and lf.updated > (update_items|length) %}/{{ lf.updated }}{% endif %}</span></h3>
+            <ul class="changes-list">
+              {% for item in update_items %}
+              <li data-kind="update">
+                <a href="{{ item.href }}">
+                  <strong>{{ item.title }}</strong>
+                  <span class="change-detail">{{ item.change_summary }}</span>
+                  {% if item.location %}
+                  <span class="muted tiny">{{ item.location }}</span>
+                  {% endif %}
+                </a>
+              </li>
+              {% endfor %}
+            </ul>
+          </section>
+          {% elif lf.updated %}
+          <p class="muted">{{ lf.updated }} listing{{ 's' if lf.updated != 1 else '' }} updated, but no field-level detail was stored for this scan.</p>
           {% endif %}
         {% elif lf and lf.last_fetch_at %}
           <p class="muted" data-changes-empty>No listing changes in the last scan.</p>

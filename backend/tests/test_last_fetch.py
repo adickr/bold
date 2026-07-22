@@ -3,7 +3,14 @@
 from datetime import datetime, timedelta, timezone
 
 from app.api.queries import build_last_fetch_summary
-from app.models.entities import CanonicalVehicle, CollectorRun, ListingStatus, PriceEvent, SourceListing
+from app.models.entities import (
+    CanonicalVehicle,
+    CollectorRun,
+    ListingObservation,
+    ListingStatus,
+    PriceEvent,
+    SourceListing,
+)
 
 
 def test_last_fetch_summary_reports_changes(db_session):
@@ -41,7 +48,20 @@ def test_last_fetch_summary_reports_changes(db_session):
         first_seen_at=now - timedelta(minutes=2),
         last_seen_at=now,
     )
-    db_session.add(vehicle)
+    existing = CanonicalVehicle(
+        year=2021,
+        make="Toyota",
+        model="Fortuner",
+        variant_normalised="2.4 GD-6 4x4",
+        drivetrain="4x4",
+        current_lowest_price=549900,
+        current_mileage_km=62000,
+        primary_location="Bellville, Western Cape",
+        is_active=True,
+        first_seen_at=now - timedelta(days=10),
+        last_seen_at=now,
+    )
+    db_session.add_all([vehicle, existing])
     db_session.flush()
     db_session.add(
         SourceListing(
@@ -56,6 +76,48 @@ def test_last_fetch_summary_reports_changes(db_session):
             canonical_vehicle_id=vehicle.id,
             first_seen_at=now - timedelta(minutes=2),
             last_seen_at=now,
+        )
+    )
+    existing_listing = SourceListing(
+        source="cars_co_za",
+        source_listing_id="CC1",
+        url="https://www.cars.co.za/for-sale/toyota/fortuner/123",
+        title="2021 Toyota Fortuner 2.4 GD-6 4x4",
+        year=2021,
+        price_zar=549900,
+        mileage_km=62000,
+        drivetrain="4x4",
+        listing_status=ListingStatus.ACTIVE.value,
+        canonical_vehicle_id=existing.id,
+        first_seen_at=now - timedelta(days=10),
+        last_seen_at=now,
+    )
+    db_session.add(existing_listing)
+    db_session.flush()
+    db_session.add(
+        ListingObservation(
+            source_listing_id=existing_listing.id,
+            observed_at=now - timedelta(days=2),
+            price_zar=549900,
+            mileage_km=58000,
+            title="2021 Toyota Fortuner 2.4 GD-6 4x4",
+            dealer_name="Old Dealer",
+            source="cars_co_za",
+            availability_status=ListingStatus.ACTIVE.value,
+            changed_fields=[],
+        )
+    )
+    db_session.add(
+        ListingObservation(
+            source_listing_id=existing_listing.id,
+            observed_at=now - timedelta(minutes=2),
+            price_zar=549900,
+            mileage_km=62000,
+            title="2021 Toyota Fortuner 2.4 GD-6 4x4",
+            dealer_name="New Dealer Cape",
+            source="cars_co_za",
+            availability_status=ListingStatus.ACTIVE.value,
+            changed_fields=["mileage_km", "dealer_name"],
         )
     )
     db_session.add(
@@ -83,6 +145,11 @@ def test_last_fetch_summary_reports_changes(db_session):
     assert summary["changes"]["price_cuts"]
     assert summary["changes"]["new"][0]["href"].startswith("/vehicles/")
     assert summary["changes"]["price_cuts"][0]["change_label"].startswith("−R")
+    updates = summary["changes"]["updates"]
+    assert updates
+    assert updates[0]["id"] == existing.id
+    assert "Mileage" in updates[0]["change_summary"]
+    assert "Dealer" in updates[0]["change_summary"]
 
 
 def test_last_fetch_summary_no_runs(db_session):

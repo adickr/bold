@@ -10,7 +10,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
-from app.models.entities import CanonicalVehicle, CollectorRun, PriceEvent
+from app.models.entities import CanonicalVehicle, CollectorRun, ListingObservation, PriceEvent, SourceListing
 from app.schemas.listings import DashboardStats, VehicleFilterParams
 from app.services.media import absolute_url, is_valid_marketplace_url, normalise_listing_url, source_label
 
@@ -421,7 +421,7 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
         or 0
     )
 
-    new_items, cut_items = _fetch_change_items(db, session_start)
+    new_items, cut_items, update_items = _fetch_change_items(db, session_start)
     # Compact chips for the dashboard strip
     highlights: list[dict[str, Any]] = []
     for item in new_items[:3]:
@@ -444,6 +444,20 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
                 "href": item["href"],
             }
         )
+    for item in update_items:
+        if len(highlights) >= 6:
+            break
+        # Prefer non-cut updates in the chip strip (cuts already covered)
+        if item.get("fields") == ["price_zar"] and (item.get("change_zar") or 0) < 0:
+            continue
+        highlights.append(
+            {
+                "kind": "update",
+                "label": f"Updated · {item['title']}",
+                "detail": item.get("change_summary"),
+                "href": item["href"],
+            }
+        )
 
     has_changes = bool(new_count or updated_count or price_cuts)
     return {
@@ -460,6 +474,7 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
         "changes": {
             "new": new_items,
             "price_cuts": cut_items,
+            "updates": update_items,
         },
         "summary": _fetch_change_summary(new_count, updated_count, price_cuts, has_changes),
     }
@@ -471,14 +486,76 @@ def _fmt_zar_spaces(value: int | None) -> str | None:
     return f"R{int(value):,}".replace(",", " ")
 
 
+def _fmt_km_spaces(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return f"{int(value):,}".replace(",", " ") + " km"
+
+
 def _vehicle_change_title(vehicle: CanonicalVehicle) -> str:
     return f"{vehicle.year or ''} {vehicle.variant_normalised or 'Fortuner'}".strip()
 
 
+def _observation_field_details(
+    obs: ListingObservation, prev: ListingObservation | None
+) -> tuple[list[str], list[str], int | None]:
+    """Human-readable field changes, raw field keys, and price delta if any."""
+    raw_fields = [f for f in (obs.changed_fields or []) if f and f != "created"]
+    if not raw_fields:
+        return [], [], None
+
+    details: list[str] = []
+    change_zar: int | None = None
+    for field in raw_fields:
+        if field == "relisted":
+            details.append("Relisted")
+        elif field == "price_zar":
+            old = prev.price_zar if prev else None
+            new = obs.price_zar
+            if old is not None and new is not None:
+                change_zar = int(new) - int(old)
+                arrow = f"{_fmt_zar_spaces(old)} → {_fmt_zar_spaces(new)}"
+                if new < old:
+                    details.append(f"Price cut {arrow}")
+                elif new > old:
+                    details.append(f"Price up {arrow}")
+                else:
+                    details.append("Price unchanged")
+            elif new is not None:
+                details.append(f"Price {_fmt_zar_spaces(new)}")
+            else:
+                details.append("Price updated")
+        elif field == "mileage_km":
+            old = prev.mileage_km if prev else None
+            new = obs.mileage_km
+            if old is not None and new is not None and old != new:
+                details.append(f"Mileage {_fmt_km_spaces(old)} → {_fmt_km_spaces(new)}")
+            elif new is not None:
+                details.append(f"Mileage {_fmt_km_spaces(new)}")
+            else:
+                details.append("Mileage updated")
+        elif field == "dealer_name":
+            old = (prev.dealer_name if prev else None) or None
+            new = obs.dealer_name
+            if old and new and old != new:
+                details.append(f"Dealer {old} → {new}")
+            elif new:
+                details.append(f"Dealer {new}")
+            else:
+                details.append("Dealer updated")
+        elif field == "title":
+            details.append("Title updated")
+        elif field == "description":
+            details.append("Description updated")
+        else:
+            details.append(field.replace("_", " ").capitalize())
+    return details, raw_fields, change_zar
+
+
 def _fetch_change_items(
     db: Session, session_start: datetime
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Concrete new listings and price cuts from the last collect wave."""
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Concrete new listings, price cuts, and field-level updates from the last wave."""
     new_vehicles = (
         db.execute(
             select(CanonicalVehicle)
@@ -493,6 +570,7 @@ def _fetch_change_items(
         .all()
     )
     new_items: list[dict[str, Any]] = []
+    new_ids = {v.id for v in new_vehicles}
     for v in new_vehicles:
         new_items.append(
             {
@@ -518,14 +596,14 @@ def _fetch_change_items(
         .all()
     )
     cut_items: list[dict[str, Any]] = []
-    seen_vehicle_ids: set[int] = set()
+    seen_cut_ids: set[int] = set()
     for event in cut_events:
-        if not event.canonical_vehicle_id or event.canonical_vehicle_id in seen_vehicle_ids:
+        if not event.canonical_vehicle_id or event.canonical_vehicle_id in seen_cut_ids:
             continue
         vehicle = db.get(CanonicalVehicle, event.canonical_vehicle_id)
         if not vehicle:
             continue
-        seen_vehicle_ids.add(vehicle.id)
+        seen_cut_ids.add(vehicle.id)
         drop = abs(int(event.change_zar or 0))
         cut_items.append(
             {
@@ -543,7 +621,71 @@ def _fetch_change_items(
             }
         )
 
-    return new_items, cut_items
+    observations = list(
+        db.execute(
+            select(ListingObservation)
+            .where(ListingObservation.observed_at >= session_start)
+            .order_by(ListingObservation.observed_at.desc())
+            .limit(250)
+        )
+        .scalars()
+        .all()
+    )
+    update_items: list[dict[str, Any]] = []
+    seen_listing_ids: set[int] = set()
+    for obs in observations:
+        if obs.source_listing_id in seen_listing_ids:
+            continue
+        fields = [f for f in (obs.changed_fields or []) if f and f != "created"]
+        if not fields:
+            continue
+        seen_listing_ids.add(obs.source_listing_id)
+
+        listing = db.get(SourceListing, obs.source_listing_id)
+        if not listing or not listing.canonical_vehicle_id:
+            continue
+        if listing.canonical_vehicle_id in new_ids:
+            continue
+        vehicle = db.get(CanonicalVehicle, listing.canonical_vehicle_id)
+        if not vehicle:
+            continue
+
+        prev = db.execute(
+            select(ListingObservation)
+            .where(
+                ListingObservation.source_listing_id == obs.source_listing_id,
+                ListingObservation.id != obs.id,
+                ListingObservation.observed_at < obs.observed_at,
+            )
+            .order_by(ListingObservation.observed_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+        details, raw_fields, change_zar = _observation_field_details(obs, prev)
+        if not details:
+            continue
+        update_items.append(
+            {
+                "kind": "update",
+                "id": vehicle.id,
+                "listing_id": listing.id,
+                "title": _vehicle_change_title(vehicle),
+                "price": vehicle.current_lowest_price,
+                "price_label": _fmt_zar_spaces(vehicle.current_lowest_price),
+                "mileage": vehicle.current_mileage_km,
+                "location": vehicle.primary_location or listing.dealer_location,
+                "fields": raw_fields,
+                "details": details,
+                "change_summary": " · ".join(details),
+                "change_zar": change_zar,
+                "href": f"/vehicles/{vehicle.id}",
+                "source": listing.source,
+            }
+        )
+        if len(update_items) >= 40:
+            break
+
+    return new_items, cut_items, update_items
 
 
 def _fetch_change_summary(new: int, updated: int, cuts: int, has_changes: bool) -> str:

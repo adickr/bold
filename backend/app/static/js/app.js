@@ -260,6 +260,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     const changes = lastFetch.changes || {};
     const newItems = changes.new || [];
     const cutItems = changes.price_cuts || [];
+    const updateItems = changes.updates || [];
     if (!lastFetch.has_changes) {
       body.innerHTML = `<p class="muted" data-changes-empty>No listing changes in the last scan.</p>`;
       return;
@@ -289,11 +290,22 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
         .join("");
       html += `</ul></section>`;
     }
-    const updated = Number(lastFetch.updated || 0);
-    if (updated && !newItems.length && !cutItems.length) {
-      html += `<p class="muted">${updated} listing${updated === 1 ? "" : "s"} re-checked with no new stock or price cuts to list.</p>`;
-    } else if (updated && (newItems.length || cutItems.length)) {
-      html += `<p class="muted tiny">Also ${updated} existing listing${updated === 1 ? "" : "s"} re-checked without a price move.</p>`;
+    if (updateItems.length) {
+      const updatedTotal = Number(lastFetch.updated || 0);
+      const countLabel = updatedTotal > updateItems.length
+        ? `${updateItems.length}/${updatedTotal}`
+        : String(updateItems.length);
+      html += `<section><h3>Updated listings <span class="mono">${escapeHtml(countLabel)}</span></h3><ul class="changes-list">`;
+      html += updateItems
+        .map((item) => {
+          const detail = escapeHtml(item.change_summary || (item.details || []).join(" · ") || "Updated");
+          const loc = item.location ? `<span class="muted tiny">${escapeHtml(item.location)}</span>` : "";
+          return `<li data-kind="update"><a href="${escapeHtml(item.href || "#")}"><strong>${escapeHtml(item.title || "Fortuner")}</strong><span class="change-detail">${detail}</span>${loc}</a></li>`;
+        })
+        .join("");
+      html += `</ul></section>`;
+    } else if (Number(lastFetch.updated || 0) > 0) {
+      html += `<p class="muted">${Number(lastFetch.updated)} listing${Number(lastFetch.updated) === 1 ? "" : "s"} updated, but no field-level detail was stored for this scan.</p>`;
     }
     if (!html) {
       html = `<p class="muted" data-changes-empty>Changes were counted but no detail rows are available yet.</p>`;
