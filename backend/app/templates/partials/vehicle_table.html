@@ -35,7 +35,13 @@
         <td>{{ v.dealer or '—' }}</td>
         <td>{{ v.days_tracked }}</td>
         <td>{% if v.total_reduction %}{{ v.total_reduction | zar }}{% else %}—{% endif %}</td>
-        <td><span class="score">{{ v.deal_score if v.deal_score is not none else '—' }}</span></td>
+        <td>
+          {% if v.deal_score is not none and v.deal_score_breakdown %}
+          <span class="score score-tip" tabindex="0" data-score-tip="{{ v.deal_score_breakdown | tojson | forceescape }}">{{ v.deal_score }}</span>
+          {% else %}
+          <span class="score">{{ v.deal_score if v.deal_score is not none else '—' }}</span>
+          {% endif %}
+        </td>
         <td>{{ v.motivation_level or '—' }}</td>
         <td class="links-cell">
           <a class="btn-link" href="{{ v.detail_path }}">Agent detail</a>

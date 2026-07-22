@@ -263,6 +263,7 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
         "days_tracked": v.days_tracked,
         "total_reduction": v.total_reduction_zar,
         "deal_score": v.deal_score,
+        "deal_score_breakdown": v.deal_score_breakdown,
         "motivation_score": v.motivation_score,
         "motivation_level": v.motivation_level,
         "source_count": v.source_count,

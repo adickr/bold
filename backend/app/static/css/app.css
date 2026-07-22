@@ -109,6 +109,57 @@ table.listings { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 table.listings th, table.listings td { padding: 0.7rem 0.65rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
 table.listings th { color: var(--muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; background: var(--bg-2); }
 .score { font-family: var(--mono); }
+.score-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  border-bottom: 1px dotted rgba(155, 176, 163, 0.55);
+  outline: none;
+}
+.score-tip:hover,
+.score-tip:focus-visible {
+  color: var(--accent-2);
+}
+.score-tip-float {
+  position: fixed;
+  z-index: 80;
+  min-width: 220px;
+  max-width: min(280px, calc(100vw - 1.5rem));
+  padding: 0.7rem 0.8rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #14201b;
+  color: var(--ink);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.score-tip-float[hidden] { display: none; }
+.score-tip-float .tip-title {
+  display: block;
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.score-tip-float .score-break li {
+  gap: 1rem;
+  font-size: 0.82rem;
+  padding: 0.28rem 0;
+}
+.score-tip-float .score-break li span { color: var(--muted); text-transform: capitalize; }
+.score-tip-float .score-break li strong { font-family: var(--mono); font-weight: 500; }
+.score-tip-float .score-break li[data-key="total"] strong { color: var(--accent-2); }
+.score-tip-float .score-break li[data-key="risk_penalty"] strong { color: var(--danger); }
+.score-tip-float .tip-note {
+  display: block;
+  margin-top: 0.55rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
 .row-actions { font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; }
 .row-actions a { color: var(--accent-2); }
 .links-cell { display: grid; gap: 0.25rem; min-width: 7.5rem; }

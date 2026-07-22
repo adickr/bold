@@ -386,6 +386,15 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       .join("");
   }
 
+  function scoreCellHtml(v) {
+    if (v.deal_score == null) return `<span class="score">—</span>`;
+    if (!v.deal_score_breakdown) {
+      return `<span class="score">${escapeHtml(v.deal_score)}</span>`;
+    }
+    const payload = escapeHtml(JSON.stringify(v.deal_score_breakdown));
+    return `<span class="score score-tip" tabindex="0" data-score-tip="${payload}">${escapeHtml(v.deal_score)}</span>`;
+  }
+
   function vehicleRowHtml(v, isNew) {
     const mileage = v.mileage != null ? `${Number(v.mileage).toLocaleString("en-ZA")} km` : "—";
     const primary = v.primary_source && v.primary_source.url
@@ -410,7 +419,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       <td>${escapeHtml(v.dealer || "—")}</td>
       <td>${escapeHtml(v.days_tracked ?? "—")}</td>
       <td>${v.total_reduction ? zar(v.total_reduction) : "—"}</td>
-      <td><span class="score">${v.deal_score != null ? escapeHtml(v.deal_score) : "—"}</span></td>
+      <td>${scoreCellHtml(v)}</td>
       <td>${escapeHtml(v.motivation_level || "—")}</td>
       <td class="links-cell">
         <a class="btn-link" href="${escapeHtml(v.detail_path)}">Agent detail</a>
@@ -502,4 +511,138 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
   if (panel.dataset.autoPoll === "1" || panel.classList.contains("is-active")) {
     poll();
   }
+})();
+
+(function scoreTipPopup() {
+  const LABELS = {
+    price_value: "Price value",
+    completeness: "Completeness",
+    mileage: "Mileage",
+    reduction_history: "Reduction history",
+    time_on_market: "Time on market",
+    history_quality: "History quality",
+    risk_penalty: "Risk penalty",
+    total: "Total",
+  };
+  const ORDER = [
+    "price_value",
+    "completeness",
+    "mileage",
+    "reduction_history",
+    "time_on_market",
+    "history_quality",
+    "risk_penalty",
+    "total",
+  ];
+
+  const tip = document.createElement("div");
+  tip.className = "score-tip-float";
+  tip.hidden = true;
+  tip.setAttribute("role", "tooltip");
+  document.body.appendChild(tip);
+
+  let hideTimer = null;
+  let activeEl = null;
+
+  function escapeText(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function parseBreakdown(el) {
+    const raw = el.getAttribute("data-score-tip");
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch (_err) {
+      return null;
+    }
+  }
+
+  function renderBreakdown(breakdown) {
+    const keys = ORDER.filter((k) => breakdown[k] != null);
+    for (const k of Object.keys(breakdown)) {
+      if (!keys.includes(k) && k !== "note" && k !== "inferred") keys.push(k);
+    }
+    const rows = keys
+      .map((k) => {
+        const label = LABELS[k] || k.replace(/_/g, " ");
+        return `<li data-key="${escapeText(k)}"><span>${escapeText(label)}</span><strong>${escapeText(breakdown[k])}</strong></li>`;
+      })
+      .join("");
+    const note = breakdown.note
+      ? `<span class="tip-note">${escapeText(breakdown.note)}</span>`
+      : "";
+    tip.innerHTML = `<span class="tip-title">Deal score breakdown</span><ul class="score-break">${rows}</ul>${note}`;
+  }
+
+  function placeTip(el) {
+    const rect = el.getBoundingClientRect();
+    tip.hidden = false;
+    // Measure after showing
+    const tipRect = tip.getBoundingClientRect();
+    let left = rect.left + rect.width / 2 - tipRect.width / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+    let top = rect.top - tipRect.height - 10;
+    if (top < 8) top = rect.bottom + 10;
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+  }
+
+  function showTip(el) {
+    const breakdown = parseBreakdown(el);
+    if (!breakdown) return;
+    if (hideTimer) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+    activeEl = el;
+    renderBreakdown(breakdown);
+    placeTip(el);
+  }
+
+  function scheduleHide() {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      tip.hidden = true;
+      activeEl = null;
+    }, 120);
+  }
+
+  document.addEventListener("pointerover", (e) => {
+    const el = e.target.closest(".score-tip");
+    if (!el) return;
+    showTip(el);
+  });
+  document.addEventListener("pointerout", (e) => {
+    const el = e.target.closest(".score-tip");
+    if (!el) return;
+    const related = e.relatedTarget && e.relatedTarget.closest
+      ? e.relatedTarget.closest(".score-tip")
+      : null;
+    if (related === el) return;
+    scheduleHide();
+  });
+  document.addEventListener("focusin", (e) => {
+    const el = e.target.closest(".score-tip");
+    if (el) showTip(el);
+  });
+  document.addEventListener("focusout", (e) => {
+    const el = e.target.closest(".score-tip");
+    if (!el) return;
+    scheduleHide();
+  });
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (activeEl && !tip.hidden) placeTip(activeEl);
+    },
+    true
+  );
+  window.addEventListener("resize", () => {
+    if (activeEl && !tip.hidden) placeTip(activeEl);
+  });
 })();
