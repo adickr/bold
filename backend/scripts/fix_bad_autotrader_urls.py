@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repair or delete AutoTrader rows with invalid short URLs."""
+"""Remove AutoTrader rows with invalid or invented SEO URLs (they 503 in-browser)."""
 
 from __future__ import annotations
 
@@ -17,11 +17,12 @@ from app.models.entities import (
     CanonicalVehicle,
     DuplicateMatchEvidence,
     ListingObservation,
+    ListingStatus,
     PriceEvent,
     ShortlistEntry,
     SourceListing,
 )
-from app.services.media import is_valid_marketplace_url, normalise_listing_url
+from app.services.media import is_valid_marketplace_url, looks_like_invented_autotrader_url
 
 
 def main() -> None:
@@ -33,25 +34,18 @@ def main() -> None:
             .scalars()
             .all()
         )
-        repaired = 0
         bad_ids: list[int] = []
+        cleared = 0
         for row in rows:
-            fixed = normalise_listing_url(
-                row.source,
-                row.url,
-                listing_id=row.source_listing_id,
-                title=row.title,
-                variant=row.variant_raw or row.variant_normalised,
-                year=row.year,
-            )
-            if fixed and is_valid_marketplace_url("autotrader", fixed):
-                if fixed != row.url:
-                    row.url = fixed
-                    repaired += 1
+            if is_valid_marketplace_url("autotrader", row.url) and not looks_like_invented_autotrader_url(
+                row.url
+            ):
                 continue
+            # Prefer delete unusable outbound links so re-collect can reinsert clean ones
             bad_ids.append(row.id)
+            cleared += 1
 
-        print(f"Repaired {repaired} AutoTrader URLs; deleting {len(bad_ids)} unrepairable")
+        print(f"Deleting {cleared} AutoTrader listings with bad/invented URLs")
         if bad_ids:
             db.execute(
                 delete(ListingObservation).where(
@@ -72,7 +66,14 @@ def main() -> None:
         vehicles = db.execute(select(CanonicalVehicle)).scalars().all()
         removed = 0
         for vehicle in vehicles:
-            if vehicle.source_listings:
+            linked = list(vehicle.source_listings or [])
+            if linked:
+                # Recompute active flag if all AT links gone
+                vehicle.is_active = any(
+                    x.listing_status
+                    in {ListingStatus.ACTIVE.value, ListingStatus.RELISTED.value}
+                    for x in linked
+                )
                 continue
             if vehicle.shortlist_entry:
                 db.delete(vehicle.shortlist_entry)
@@ -89,7 +90,7 @@ def main() -> None:
             db.delete(vehicle)
             removed += 1
         db.commit()
-        print(f"Removed {removed} orphan vehicles")
+        print(f"Removed {removed} orphan vehicles — re-collect live to restore AutoTrader links")
     finally:
         db.close()
 

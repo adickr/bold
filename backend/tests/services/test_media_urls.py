@@ -2,30 +2,70 @@
 
 from app.services.media import (
     is_valid_marketplace_url,
+    looks_like_invented_autotrader_url,
     normalise_listing_url,
     rebuild_autotrader_url,
 )
 
 
-def test_rebuild_short_autotrader_url():
-    url = rebuild_autotrader_url("28638215", title="2023 Toyota Fortuner 2.4GD-6 4x4")
-    assert url is not None
-    assert "28638215" in url
-    assert "/car-for-sale/toyota/fortuner/" in url
-    assert is_valid_marketplace_url("autotrader", url)
-
-
-def test_normalise_repairs_short_autotrader_path():
-    fixed = normalise_listing_url(
-        "autotrader",
-        "https://www.autotrader.co.za/car-for-sale/28638215",
-        listing_id="28638215",
-        title="2023 Toyota Fortuner 2.4GD-6 4x4",
-        variant="2.4GD-6 4x4",
+def test_rebuild_autotrader_url_never_invents():
+    assert (
+        rebuild_autotrader_url(
+            "28638215",
+            title="2023 Toyota Fortuner 2.4GD-6 4x4",
+            variant="2.4GD-6 4x4",
+        )
+        is None
     )
-    assert fixed
-    assert is_valid_marketplace_url("autotrader", fixed)
-    assert fixed.endswith("/28638215")
+
+
+def test_short_and_invented_autotrader_urls_are_invalid():
+    assert not is_valid_marketplace_url(
+        "autotrader", "https://www.autotrader.co.za/car-for-sale/28638215"
+    )
+    assert not is_valid_marketplace_url(
+        "autotrader",
+        "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2-4gd-6/28638215",
+    )
+    assert looks_like_invented_autotrader_url(
+        "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2-4gd-6/28638215"
+    )
+    assert is_valid_marketplace_url(
+        "autotrader",
+        "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6/28638215",
+    )
+    assert not looks_like_invented_autotrader_url(
+        "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6/28638215"
+    )
+
+
+def test_normalise_rejects_bad_autotrader_urls():
+    assert (
+        normalise_listing_url(
+            "autotrader",
+            "https://www.autotrader.co.za/car-for-sale/28638215",
+            listing_id="28638215",
+            title="2023 Toyota Fortuner 2.4GD-6 4x4",
+            variant="2.4GD-6 4x4",
+        )
+        is None
+    )
+    assert (
+        normalise_listing_url(
+            "autotrader",
+            "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2-4gd-6/28638215",
+            listing_id="28638215",
+        )
+        is None
+    )
+    assert (
+        normalise_listing_url(
+            "autotrader",
+            "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6/28638215",
+            listing_id="28638215",
+        )
+        == "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6/28638215"
+    )
 
 
 def test_rejects_non_numeric_autotrader_fixture_id():

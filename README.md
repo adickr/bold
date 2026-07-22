@@ -72,7 +72,7 @@ export ENABLE_SCHEDULER=false
 export PLAYWRIGHT_HEADED=true
 export PLAYWRIGHT_USER_DATA_DIR=./data/chrome-profile
 
-# Repair old broken AutoTrader short URLs, then start the app
+# Delete AutoTrader rows with invented/broken URLs (they 503 in-browser), then start the app
 python scripts/fix_bad_autotrader_urls.py
 lsof -ti:8000 | xargs kill -9 2>/dev/null
 uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -87,7 +87,7 @@ Notes:
 - Keep volume low; this is a private tool
 - Listings outside 4x4 / ~110k km are filtered out (price is not a hard reject)
 - Asking prices only — not sold prices
-- Marketplace buttons only show when the URL is a real detail page (short `/car-for-sale/{id}` links are repaired or hidden)
+- Marketplace buttons only show for real scraped detail URLs (AutoTrader slugs are never invented — wrong slug → site error)
 - Cars.co.za opens **one** Chrome window for the whole scan — click Cloudflare at most once; cookies stay in `./data/chrome-profile`
 - If Cars.co.za still fails, AutoTrader + WeBuyCars still feed the dashboard
 

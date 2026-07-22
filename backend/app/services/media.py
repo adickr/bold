@@ -56,7 +56,7 @@ def absolute_url(url: str | None, *, source: str | None = None) -> str | None:
 def _slugify(text: str | None) -> str:
     raw = (text or "").lower()
     raw = re.sub(r"toyota|fortuner", " ", raw)
-    raw = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    raw = re.sub(r"[^a-z0-9.]+", "-", raw).strip("-")
     return raw[:80] or "4x4"
 
 
@@ -66,13 +66,26 @@ def rebuild_autotrader_url(
     title: str | None = None,
     variant: str | None = None,
 ) -> str | None:
-    """Build a SEO-shaped AutoTrader detail URL from listing id + title/variant."""
-    if not listing_id or not str(listing_id).isdigit() or len(str(listing_id)) < 6:
-        return None
-    slug = _slugify(variant or title)
-    return (
-        f"https://www.autotrader.co.za/car-for-sale/toyota/fortuner/{slug}/{listing_id}"
-    )
+    """Do not invent AutoTrader SEO URLs.
+
+    AutoTrader returns HTTP 503 when the slug is wrong (e.g. ``2-4gd-6`` instead of
+    ``2.4gd-6``). Only real scraped detail hrefs are safe to open.
+    """
+    return None
+
+
+def looks_like_invented_autotrader_url(url: str | None) -> bool:
+    """True for previously rebuilt paths that AutoTrader rejects (dot→hyphen engines)."""
+    if not url:
+        return False
+    path = urlparse(url).path.lower()
+    # Our old slugify turned "2.4gd-6" into "2-4gd-6"
+    if re.search(r"/fortuner/\d-\d", path):
+        return True
+    # Bare /car-for-sale/{id}
+    if re.match(r"^/car-for-sale/\d{6,}/?$", path):
+        return True
+    return False
 
 
 def rebuild_webuycars_url(listing_id: str | None) -> str | None:
@@ -106,6 +119,8 @@ def is_valid_marketplace_url(source: str | None, url: str | None) -> bool:
     abs_url = absolute_url(url, source=source)
     if not abs_url:
         return False
+    if source == "autotrader" and looks_like_invented_autotrader_url(abs_url):
+        return False
     path = urlparse(abs_url).path
     if source == "autotrader":
         return bool(_AT_DETAIL_RE.match(path))
@@ -126,14 +141,14 @@ def normalise_listing_url(
     variant: str | None = None,
     year: int | None = None,
 ) -> str | None:
-    """Absolutize and repair common broken marketplace URL shapes."""
+    """Absolutize and repair common broken marketplace URL shapes.
+
+    AutoTrader: never invent SEO slugs (wrong slug → site error page).
+    """
     abs_url = absolute_url(url, source=source)
     if source == "autotrader":
         if abs_url and is_valid_marketplace_url("autotrader", abs_url):
             return abs_url.split("?")[0]
-        rebuilt = rebuild_autotrader_url(listing_id, title=title, variant=variant)
-        if rebuilt:
-            return rebuilt
         return None
     if source == "cars_co_za":
         if abs_url and is_valid_marketplace_url("cars_co_za", abs_url):
