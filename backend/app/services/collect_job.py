@@ -139,6 +139,8 @@ def _run_job() -> None:
                         source,
                         status="done",
                         found=found,
+                        new=result.get("new"),
+                        updated=result.get("updated"),
                         error=None,
                         seconds=round(time.time() - t0, 1),
                     )
@@ -147,6 +149,8 @@ def _run_job() -> None:
                         source,
                         status="failed",
                         found=found,
+                        new=result.get("new"),
+                        updated=result.get("updated"),
                         error=result.get("error") or "failed",
                         seconds=round(time.time() - t0, 1),
                     )

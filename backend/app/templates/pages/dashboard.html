@@ -13,6 +13,34 @@
     </form>
     <p class="muted tiny">Runs AutoTrader, Cars.co.za and WeBuyCars (often 2–5 minutes). Progress updates live below.</p>
 
+    <div class="fetch-meta" data-fetch-meta>
+      {% set lf = stats.last_fetch %}
+      {% if lf and lf.last_fetch_at %}
+      <p class="fetch-line">
+        <span class="muted">Last fetch</span>
+        <time class="mono" data-fetch-at datetime="{{ lf.last_fetch_at }}">{{ lf.last_fetch_at }}</time>
+        <span class="fetch-sep">·</span>
+        <span class="fetch-changes {% if lf.has_changes %}has-changes{% else %}no-changes{% endif %}" data-fetch-changes>
+          {{ lf.summary }}
+        </span>
+      </p>
+      {% if lf.highlights %}
+      <ul class="fetch-highlights" data-fetch-highlights>
+        {% for h in lf.highlights[:5] %}
+        <li data-kind="{{ h.kind }}">
+          <a href="{{ h.href }}">{{ h.label }}{% if h.detail %} <span class="mono">{{ h.detail }}</span>{% endif %}</a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <ul class="fetch-highlights" data-fetch-highlights hidden></ul>
+      {% endif %}
+      {% else %}
+      <p class="fetch-line muted" data-fetch-empty>No fetch yet — run <strong>Collect live listings now</strong>.</p>
+      <ul class="fetch-highlights" data-fetch-highlights hidden></ul>
+      {% endif %}
+    </div>
+
     <div class="collect-progress {% if scanning or collect_status.running %}is-active{% endif %}"
          data-collect-progress
          {% if scanning or collect_status.running %}data-auto-poll="1"{% endif %}>

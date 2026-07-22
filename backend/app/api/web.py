@@ -85,6 +85,7 @@ def page_live_snapshot(
             "best_vx": stats.best_vx,
             "most_motivated": stats.most_motivated,
             "price_distribution": stats.price_distribution,
+            "last_fetch": stats.last_fetch,
         },
         "nationwide_count": len(nationwide),
         "matching_count": len(matching),

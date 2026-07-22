@@ -6,11 +6,11 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
-from app.models.entities import CanonicalVehicle, PriceEvent
+from app.models.entities import CanonicalVehicle, CollectorRun, PriceEvent
 from app.schemas.listings import DashboardStats, VehicleFilterParams
 from app.services.media import absolute_url, is_valid_marketplace_url, normalise_listing_url, source_label
 
@@ -363,6 +363,146 @@ def filter_vehicles(db: Session, params: VehicleFilterParams) -> list[CanonicalV
     return sort_vehicles(vehicles, params.sort)
 
 
+def _aware_dt(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
+    """Summarise the most recent collect wave: when it ran and what changed."""
+    runs = list(
+        db.execute(
+            select(CollectorRun)
+            .where(CollectorRun.finished_at.is_not(None))
+            .order_by(CollectorRun.finished_at.desc())
+            .limit(40)
+        )
+        .scalars()
+        .all()
+    )
+    if not runs:
+        return None
+
+    last_at = _aware_dt(runs[0].finished_at)
+    if last_at is None:
+        return None
+
+    wave: list[CollectorRun] = []
+    seen_sources: set[str] = set()
+    for run in runs:
+        finished = _aware_dt(run.finished_at)
+        if finished is None:
+            continue
+        if (last_at - finished).total_seconds() > 20 * 60:
+            break
+        if run.source in seen_sources:
+            continue
+        seen_sources.add(run.source)
+        wave.append(run)
+
+    session_start = min((_aware_dt(r.started_at) or last_at) for r in wave)
+    new_count = sum(int(r.listings_new or 0) for r in wave)
+    updated_count = sum(int(r.listings_updated or 0) for r in wave)
+    found_count = sum(int(r.listings_found or 0) for r in wave)
+    sources_ok = sum(1 for r in wave if r.success)
+    sources_total = len(wave)
+
+    price_cuts = int(
+        db.execute(
+            select(func.count(PriceEvent.id)).where(
+                PriceEvent.observed_at >= session_start,
+                PriceEvent.change_zar < 0,
+            )
+        ).scalar_one()
+        or 0
+    )
+
+    # Highlight a few concrete changes for the dashboard strip
+    highlights: list[dict[str, Any]] = []
+    new_vehicles = (
+        db.execute(
+            select(CanonicalVehicle)
+            .where(
+                CanonicalVehicle.is_active.is_(True),
+                CanonicalVehicle.first_seen_at >= session_start,
+            )
+            .options(selectinload(CanonicalVehicle.source_listings))
+            .order_by(CanonicalVehicle.first_seen_at.desc())
+            .limit(4)
+        )
+        .scalars()
+        .all()
+    )
+    for v in new_vehicles:
+        highlights.append(
+            {
+                "kind": "new",
+                "label": f"New · {v.year or ''} {v.variant_normalised or 'Fortuner'}".strip(),
+                "detail": f"R{(v.current_lowest_price or 0):,}".replace(",", " ")
+                if v.current_lowest_price
+                else None,
+                "href": f"/vehicles/{v.id}",
+            }
+        )
+
+    cut_events = list(
+        db.execute(
+            select(PriceEvent)
+            .where(PriceEvent.observed_at >= session_start, PriceEvent.change_zar < 0)
+            .order_by(PriceEvent.observed_at.desc())
+            .limit(4)
+        )
+        .scalars()
+        .all()
+    )
+    for event in cut_events:
+        if len(highlights) >= 6:
+            break
+        vehicle = db.get(CanonicalVehicle, event.canonical_vehicle_id) if event.canonical_vehicle_id else None
+        if not vehicle:
+            continue
+        drop = abs(int(event.change_zar or 0))
+        highlights.append(
+            {
+                "kind": "cut",
+                "label": f"Price cut · {vehicle.year or ''} {vehicle.variant_normalised or 'Fortuner'}".strip(),
+                "detail": f"−R{drop:,}".replace(",", " "),
+                "href": f"/vehicles/{vehicle.id}",
+            }
+        )
+
+    has_changes = bool(new_count or updated_count or price_cuts)
+    return {
+        "last_fetch_at": last_at.isoformat(),
+        "session_started_at": session_start.isoformat(),
+        "new": new_count,
+        "updated": updated_count,
+        "found": found_count,
+        "price_cuts": price_cuts,
+        "sources_ok": sources_ok,
+        "sources_total": sources_total,
+        "has_changes": has_changes,
+        "highlights": highlights,
+        "summary": _fetch_change_summary(new_count, updated_count, price_cuts, has_changes),
+    }
+
+
+def _fetch_change_summary(new: int, updated: int, cuts: int, has_changes: bool) -> str:
+    if not has_changes:
+        return "No listing changes in the last scan"
+    parts: list[str] = []
+    if new:
+        parts.append(f"{new} new")
+    if cuts:
+        parts.append(f"{cuts} price cut{'s' if cuts != 1 else ''}")
+    if updated:
+        parts.append(f"{updated} updated")
+    return " · ".join(parts)
+
+
 def build_price_distribution(
     prices: list[int], *, bucket_zar: int = 50_000
 ) -> list[dict[str, Any]]:
@@ -474,6 +614,7 @@ def dashboard_stats(db: Session) -> DashboardStats:
         reductions_this_week=len(reductions),
         median_asking_price=int(median(prices)) if prices else None,
         price_distribution=build_price_distribution(prices),
+        last_fetch=build_last_fetch_summary(db),
         top_deal=top_deal,
         best_grs=best_grs,
         best_vx=best_vx,

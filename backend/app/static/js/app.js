@@ -127,7 +127,98 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     renderSpot("best_vx", stats.best_vx, "Best VX");
     renderSpot("most_motivated", stats.most_motivated, "Most motivated");
     renderPriceDistribution(stats.price_distribution || [], stats.median_asking_price);
+    renderLastFetch(stats.last_fetch);
   }
+
+  function formatFetchTime(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const now = new Date();
+    const diffSec = Math.round((now - d) / 1000);
+    let relative = "";
+    if (diffSec < 60) relative = "just now";
+    else if (diffSec < 3600) relative = `${Math.floor(diffSec / 60)}m ago`;
+    else if (diffSec < 86400) relative = `${Math.floor(diffSec / 3600)}h ago`;
+    else relative = `${Math.floor(diffSec / 86400)}d ago`;
+    const absolute = d.toLocaleString(undefined, {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return `${absolute} (${relative})`;
+  }
+
+  function renderLastFetch(lastFetch) {
+    const root = document.querySelector("[data-fetch-meta]");
+    if (!root) return;
+    const empty = root.querySelector("[data-fetch-empty]");
+    let line = root.querySelector(".fetch-line:not([data-fetch-empty])");
+    const highlights = root.querySelector("[data-fetch-highlights]");
+
+    if (!lastFetch || !lastFetch.last_fetch_at) {
+      if (line && !line.matches("[data-fetch-empty]")) line.remove();
+      if (empty) {
+        empty.hidden = false;
+      } else {
+        const p = document.createElement("p");
+        p.className = "fetch-line muted";
+        p.dataset.fetchEmpty = "1";
+        p.innerHTML = 'No fetch yet — run <strong>Collect live listings now</strong>.';
+        root.prepend(p);
+      }
+      if (highlights) {
+        highlights.innerHTML = "";
+        highlights.hidden = true;
+      }
+      return;
+    }
+
+    if (empty) empty.remove();
+    if (!line) {
+      line = document.createElement("p");
+      line.className = "fetch-line";
+      line.innerHTML = `<span class="muted">Last fetch</span>
+        <time class="mono" data-fetch-at></time>
+        <span class="fetch-sep">·</span>
+        <span class="fetch-changes" data-fetch-changes></span>`;
+      root.prepend(line);
+    }
+    const timeEl = line.querySelector("[data-fetch-at]");
+    const changesEl = line.querySelector("[data-fetch-changes]");
+    if (timeEl) {
+      timeEl.setAttribute("datetime", lastFetch.last_fetch_at);
+      timeEl.textContent = formatFetchTime(lastFetch.last_fetch_at);
+    }
+    if (changesEl) {
+      changesEl.textContent = lastFetch.summary || (lastFetch.has_changes ? "Changes found" : "No listing changes in the last scan");
+      changesEl.classList.toggle("has-changes", !!lastFetch.has_changes);
+      changesEl.classList.toggle("no-changes", !lastFetch.has_changes);
+    }
+    if (highlights) {
+      const items = lastFetch.highlights || [];
+      if (!items.length) {
+        highlights.innerHTML = "";
+        highlights.hidden = true;
+      } else {
+        highlights.hidden = false;
+        highlights.innerHTML = items
+          .slice(0, 5)
+          .map((h) => {
+            const detail = h.detail ? ` <span class="mono">${escapeHtml(h.detail)}</span>` : "";
+            return `<li data-kind="${escapeHtml(h.kind || "")}"><a href="${escapeHtml(h.href || "#")}">${escapeHtml(h.label || "Change")}${detail}</a></li>`;
+          })
+          .join("");
+      }
+    }
+  }
+
+  // Format any server-rendered last-fetch timestamp on load
+  document.querySelectorAll("[data-fetch-at]").forEach((el) => {
+    const iso = el.getAttribute("datetime");
+    if (iso) el.textContent = formatFetchTime(iso);
+  });
 
   function renderPriceDistribution(buckets, medianPrice) {
     const section = document.querySelector("[data-price-dist]");

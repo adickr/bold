@@ -289,6 +289,47 @@ tr.is-new-listing {
   word-break: break-word;
 }
 
+.fetch-meta {
+  margin: 1rem 0 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0,0,0,0.18);
+}
+.fetch-line {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  align-items: baseline;
+  font-size: 0.9rem;
+}
+.fetch-line time { color: var(--ink); }
+.fetch-sep { color: var(--muted); }
+.fetch-changes.has-changes { color: var(--accent-2); font-weight: 600; }
+.fetch-changes.no-changes { color: var(--muted); }
+.fetch-highlights {
+  list-style: none; margin: 0.65rem 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 0.45rem;
+}
+.fetch-highlights[hidden] { display: none; }
+.fetch-highlights li a {
+  display: inline-flex; gap: 0.4rem; align-items: baseline;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(126,200,163,0.08);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.8rem;
+}
+.fetch-highlights li[data-kind="cut"] a {
+  background: rgba(196,163,90,0.12);
+  border-color: rgba(196,163,90,0.35);
+}
+.fetch-highlights li a:hover { filter: brightness(1.08); text-decoration: none; }
+.fetch-highlights .mono { color: var(--muted); font-size: 0.75rem; }
+
 @media (max-width: 900px) {
   .hero-panel, .detail-hero, .detail-grid, .spotlight-grid, .filters { grid-template-columns: 1fr; }
   .filters .grow { grid-column: span 1; }
