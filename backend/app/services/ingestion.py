@@ -85,6 +85,8 @@ class IngestionService:
 
                 result = evaluate_listing(payload, self.settings)
                 if not result.accepted or not result.variant:
+                    # Drop already-stored noise immediately (don't wait for miss counters)
+                    self._reject_existing_payload(payload, result.reasons)
                     continue
                 # Repair / reject broken marketplace URLs before persist
                 fixed_url = normalise_listing_url(
@@ -102,6 +104,7 @@ class IngestionService:
                         payload.source_listing_id,
                         payload.url,
                     )
+                    self._reject_existing_payload(payload, ["invalid_url"])
                     continue
                 payload.url = fixed_url
                 seen_ids.add(payload.source_listing_id)
@@ -119,6 +122,7 @@ class IngestionService:
 
             # Fix prior over-merges (same marketplace, different ads glued together)
             self._repair_same_source_merges()
+            self._purge_listings_failing_criteria()
             self._scrub_bogus_price_events()
             self._scrub_all_price_aggregates()
             self._repair_listing_urls()
@@ -276,6 +280,123 @@ class IngestionService:
             self._record_price_change(listing, old_price, listing.price_zar)
 
         return listing, created, bool(changed_fields)
+
+    def _reject_existing_payload(self, payload: ListingPayload, reasons: list[str]) -> None:
+        """Immediately deactivate a stored listing that no longer meets buyer criteria."""
+        listing = self.db.execute(
+            select(SourceListing).where(
+                SourceListing.source == payload.source,
+                SourceListing.source_listing_id == payload.source_listing_id,
+            )
+        ).scalar_one_or_none()
+        if listing is None:
+            return
+        if listing.listing_status != ListingStatus.REMOVED.value:
+            logger.info(
+                "Rejecting %s/%s (%s) — marking removed",
+                payload.source,
+                payload.source_listing_id,
+                ",".join(reasons) or "criteria",
+            )
+            listing.listing_status = ListingStatus.REMOVED.value
+            listing.last_seen_at = _utcnow()
+            # Clear false 4x4 tags so browse filters don't keep surfacing them
+            reason_blob = " ".join(reasons or [])
+            if any(
+                key in reason_blob
+                for key in ("4x2", "drivetrain_unclear", "non_4x4", "not_fortuner")
+            ):
+                if listing.drivetrain == "4x4":
+                    listing.drivetrain = None
+        if listing.canonical_vehicle_id:
+            vehicle = self.db.get(CanonicalVehicle, listing.canonical_vehicle_id)
+            if vehicle:
+                self._refresh_vehicle_active_flag(vehicle)
+                # If every linked ad is non-4x4 / unclear, force inactive
+                linked = list(
+                    self.db.execute(
+                        select(SourceListing).where(
+                            SourceListing.canonical_vehicle_id == vehicle.id
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if not any(
+                    (x.listing_status or "")
+                    in {ListingStatus.ACTIVE.value, ListingStatus.RELISTED.value}
+                    and (x.drivetrain or "").lower() == "4x4"
+                    for x in linked
+                ):
+                    vehicle.is_active = False
+                    if (vehicle.drivetrain or "").lower() == "4x4":
+                        vehicle.drivetrain = listing.drivetrain
+
+    def _payload_from_listing(self, listing: SourceListing) -> ListingPayload:
+        """Rebuild a criteria payload; re-detect Cars.co.za axle from URL/title."""
+        drivetrain = listing.drivetrain
+        if listing.source == "cars_co_za":
+            from app.collectors.cars_co_za import CarsCoZaCollector
+
+            detected = CarsCoZaCollector._drivetrain_from_text(
+                listing.url, listing.title, listing.variant_raw
+            )
+            drivetrain = detected  # None when slug omits 4x4 — reject as unclear
+        return ListingPayload(
+            source=listing.source,
+            source_listing_id=listing.source_listing_id,
+            url=listing.url or "",
+            title=listing.title,
+            description=listing.description,
+            variant_raw=listing.variant_raw,
+            year=listing.year,
+            price_zar=listing.price_zar,
+            mileage_km=listing.mileage_km,
+            colour=listing.colour,
+            vin=listing.vin,
+            dealer_name=listing.dealer_name,
+            dealer_location=listing.dealer_location,
+            dealer_phone=listing.dealer_phone,
+            dealer_stock_number=listing.dealer_stock_number,
+            drivetrain=drivetrain,
+            transmission=listing.transmission,
+            fuel_type=listing.fuel_type,
+            make=listing.make or "Toyota",
+            model=listing.model or "Fortuner",
+            image_urls=listing.image_urls or [],
+        )
+
+    def _purge_listings_failing_criteria(self) -> int:
+        """Re-check active ads (e.g. Cars.co.za 4x2 demos wrongly tagged 4x4)."""
+        active = (
+            self.db.execute(
+                select(SourceListing).where(
+                    SourceListing.listing_status.in_(
+                        [
+                            ListingStatus.ACTIVE.value,
+                            ListingStatus.RELISTED.value,
+                            ListingStatus.POSSIBLY_REMOVED.value,
+                        ]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        removed = 0
+        for listing in active:
+            payload = self._payload_from_listing(listing)
+            result = evaluate_listing(payload, self.settings)
+            if result.accepted:
+                # Keep stored drivetrain honest for Cars.co.za
+                if listing.source == "cars_co_za" and payload.drivetrain != listing.drivetrain:
+                    listing.drivetrain = payload.drivetrain
+                continue
+            self._reject_existing_payload(payload, result.reasons)
+            removed += 1
+        if removed:
+            logger.info("Purged %s listings that fail current buyer criteria", removed)
+        return removed
 
     def _mark_payload_unavailable(self, payload: ListingPayload) -> None:
         """Deactivate a listing the marketplace flagged as reserved / sale-in-progress / sold."""
