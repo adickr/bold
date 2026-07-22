@@ -58,10 +58,11 @@ def start_collect_job() -> dict[str, Any]:
     settings = get_settings()
     if settings.playwright_headed or os.environ.get("PLAYWRIGHT_HEADED"):
         os.environ["PLAYWRIGHT_HEADED"] = "true"
+    # Dedicated Cars profile — AutTrader/WeBuyCars must not thrash the same cookie jar
     profile = (
         os.environ.get("PLAYWRIGHT_USER_DATA_DIR")
         or settings.playwright_user_data_dir
-        or "./data/chrome-profile"
+        or "./data/chrome-profile-cars"
     )
     # Absolute path so relative ./data/... is stable regardless of cwd
     from pathlib import Path
@@ -69,7 +70,14 @@ def start_collect_job() -> dict[str, Any]:
     abs_profile = str(Path(profile).expanduser().resolve())
     Path(abs_profile).mkdir(parents=True, exist_ok=True)
     os.environ["PLAYWRIGHT_USER_DATA_DIR"] = abs_profile
-    logger.info("Playwright profile: %s (headed=%s)", abs_profile, os.environ.get("PLAYWRIGHT_HEADED"))
+    if settings.playwright_cdp_url and not os.environ.get("PLAYWRIGHT_CDP_URL"):
+        os.environ["PLAYWRIGHT_CDP_URL"] = settings.playwright_cdp_url
+    logger.info(
+        "Playwright profile: %s (headed=%s cdp=%s)",
+        abs_profile,
+        os.environ.get("PLAYWRIGHT_HEADED"),
+        os.environ.get("PLAYWRIGHT_CDP_URL") or "-",
+    )
 
     sources = [c.source for c in all_collectors()]
     source_rows = [

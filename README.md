@@ -52,8 +52,9 @@ Open **http://127.0.0.1:8000/login** — default login `buyer` / `fortuner`.
 Sites are JS-heavy / bot-protected, so live mode uses Playwright (real Chromium).
 
 **Cars.co.za** sits behind Cloudflare Turnstile. Headless Chromium is often blocked.
-On your Mac, use a **persistent headed Chrome profile** so you can click through the
-check once; later collects reuse the cookies.
+On your Mac, use a **persistent headed Chrome profile** (without the yellow
+“controlled by automated test software” bar). If Cloudflare still loops on
+“Verifying you are human…”, use the CDP option below.
 
 ```bash
 cd ~/bold
@@ -62,7 +63,7 @@ cd backend
 source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
-# optional but recommended for Cars.co.za:
+# recommended for Cars.co.za:
 #   brew install --cask google-chrome
 
 export PYTHONPATH=.
@@ -70,7 +71,9 @@ export COLLECTOR_MODE=live
 export USE_PLAYWRIGHT=true
 export ENABLE_SCHEDULER=false
 export PLAYWRIGHT_HEADED=true
-export PLAYWRIGHT_USER_DATA_DIR=./data/chrome-profile
+export PLAYWRIGHT_USER_DATA_DIR=./data/chrome-profile-cars
+# Fresh profile if the old one is poisoned:
+#   rm -rf ./data/chrome-profile ./data/chrome-profile-cars
 
 # Delete AutoTrader rows with invented/broken URLs (they 503 in-browser), then start the app
 python scripts/fix_bad_autotrader_urls.py
@@ -80,15 +83,29 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 Open http://127.0.0.1:8000 (`buyer` / `fortuner`) → **Collect live listings now**.
 
-First Cars.co.za collect may open a Chrome window — complete the Cloudflare
-checkbox **once** on the search results page. AutoTrader / WeBuyCars do not need this.
+Cars.co.za opens **one** search page (listing cards only). If you see a checkbox,
+click it once. If it only spins on “Verifying…” and never finishes, stop the collect
+and use a normal Chrome via CDP instead:
+
+```bash
+# Terminal A — real Chrome (no automation banner)
+mkdir -p data/chrome-cdp
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$PWD/data/chrome-cdp"
+# In that window: open cars.co.za, pass the check once, leave Chrome open.
+
+# Terminal B — app
+export PLAYWRIGHT_CDP_URL=http://127.0.0.1:9222
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
 
 Notes:
 - Keep volume low; this is a private tool
 - Listings outside 4x4 / ~110k km are filtered out (price is not a hard reject)
 - Asking prices only — not sold prices
 - Marketplace buttons only show for real scraped detail URLs (AutoTrader slugs are never invented — wrong slug → site error)
-- Cars.co.za scrapes **search listing cards only** (never opens each car’s detail page). One Chrome window; Cloudflare at most once; cookies stay in `./data/chrome-profile`
+- Cars.co.za scrapes **search listing cards only** (never opens each car’s detail page)
 - If Cars.co.za still fails, AutoTrader + WeBuyCars still feed the dashboard
 
 

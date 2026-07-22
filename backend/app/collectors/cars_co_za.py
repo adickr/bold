@@ -33,7 +33,6 @@ from app.collectors.browser import (
     goto_and_wait,
     is_cloudflare_challenge,
     playwright_available,
-    soft_goto,
 )
 from app.schemas.listings import ListingPayload
 
@@ -104,10 +103,12 @@ class CarsCoZaCollector(BaseCollector):
         listings = self._search_http_only()
         if not listings:
             raise CollectorError(
-                "Cars.co.za: no listings parsed — Cloudflare is blocking. "
-                "Restart with PLAYWRIGHT_HEADED=true and "
-                "PLAYWRIGHT_USER_DATA_DIR=./data/chrome-profile, click the checkbox "
-                "ONCE in the Chrome window, leave that profile alone, then re-collect.",
+                "Cars.co.za: Cloudflare blocked the listing page. "
+                "Either (1) use PLAYWRIGHT_HEADED=true with a fresh "
+                "./data/chrome-profile-cars and wait for 'Verifying…' to finish "
+                "(no automation banner), or (2) start normal Chrome with "
+                "--remote-debugging-port=9222 and set PLAYWRIGHT_CDP_URL="
+                "http://127.0.0.1:9222 — see README. AutoTrader/WeBuyCars still work.",
                 parser_broken=True,
             )
         return listings
@@ -115,13 +116,13 @@ class CarsCoZaCollector(BaseCollector):
     def _search_single_browser_session(self) -> list[ListingPayload]:
         """One Chrome window; scrape search/listing cards only — never open detail pages.
 
-        Cloudflare should only need a checkbox on the first search URL. Later pages
-        soft-navigate or click Next in the same session.
+        Only navigate to ONE search URL. Alternate shapes / extra pages re-trigger
+        Cloudflare and cause the endless 'Verifying you are human' loop.
         """
         all_listings: list[ListingPayload] = []
         seen: set[str] = set()
-        # Listing cards already have price/km/year/location — no need for 15 detail hops
-        max_pages = max(1, min(self.settings.collector_max_pages, 6))
+        # Prefer one solid page over CF loops; expand only via in-page Next
+        max_pages = max(1, min(self.settings.collector_max_pages, 4))
         total_hint: int | None = None
         api_payloads: list[Any] = []
 
@@ -132,7 +133,6 @@ class CarsCoZaCollector(BaseCollector):
                     url = response.url or ""
                     if response.status >= 400:
                         return
-                    # Cars.co.za often hydrates results via JSON XHR
                     if not any(
                         x in url.lower()
                         for x in ("/api/", "graphql", "search", "vehicle", "listing", "usedcars")
@@ -148,52 +148,29 @@ class CarsCoZaCollector(BaseCollector):
 
             page.on("response", _on_response)
 
-            # Go straight to search — no homepage warm (that was a second CF prompt)
-            entry_urls = self.search_urls(1)
-            url_builder = None
-            html = ""
-            page_listings: list[ListingPayload] = []
-            cf_cleared = False
-            for idx, url in enumerate(entry_urls):
-                logger.info(
-                    "Cars.co.za: opening search listing page (%s/%s) — cards only, no detail clicks",
-                    idx + 1,
-                    len(entry_urls),
+            # Single entry URL only — trying a second shape re-prompts Cloudflare
+            entry_url = self.search_urls(1)[0]
+            logger.info(
+                "Cars.co.za: one search listing page (cards only): %s",
+                entry_url,
+            )
+            html = goto_and_wait(
+                page,
+                entry_url,
+                wait_selector="a[href*='/for-sale/used/']",
+                wait_through_challenge=True,
+                timeout_ms=90000,
+            )
+            if is_cloudflare_challenge(page):
+                logger.warning(
+                    "Cars.co.za still on Cloudflare after wait — aborting (will not retry URLs)"
                 )
-                if cf_cleared:
-                    html = soft_goto(
-                        page,
-                        url,
-                        wait_selector="a[href*='/for-sale/used/']",
-                        timeout_ms=90000,
-                    )
-                else:
-                    html = goto_and_wait(
-                        page,
-                        url,
-                        wait_selector="a[href*='/for-sale/used/']",
-                        wait_through_challenge=True,
-                        timeout_ms=180000,
-                    )
-                if is_cloudflare_challenge(page):
-                    logger.warning("Cars.co.za still challenged after wait: %s", url)
-                    continue
-                cf_cleared = True
-                self.snapshot_raw("search_p1", html)
-                page_listings = self._merge_page_results(html, api_payloads)
-                if page_listings:
-                    if "Western-Cape/Toyota/Fortuner" in url:
-                        url_builder = lambda p: (
-                            f"{self.SEARCH_PATH_WC}?"
-                            f"{urlencode(self.build_search_params(p, path_mode=True))}"
-                        )
-                    else:
-                        url_builder = self.search_url
-                    break
-                logger.info("Cars.co.za entry URL returned 0 cards, trying alternate shape")
+                return []
 
+            self.snapshot_raw("search_p1", html)
+            page_listings = self._merge_page_results(html, api_payloads)
             if not page_listings:
-                logger.info("Cars.co.za: no listing cards after entry URLs")
+                logger.info("Cars.co.za: no listing cards on first search page")
                 return []
 
             total_hint = self._parse_total(html)
@@ -212,23 +189,22 @@ class CarsCoZaCollector(BaseCollector):
                     break
 
                 before_api = len(api_payloads)
-                advanced = click_next_if_present(page)
-                if advanced:
-                    html = page.content()
-                    logger.info("Cars.co.za: advanced via in-page Next → page %s", page_num)
-                elif url_builder is not None:
-                    html = soft_goto(
-                        page,
-                        url_builder(page_num),
-                        wait_selector="a[href*='/for-sale/used/']",
-                        timeout_ms=90000,
+                # Never soft_goto extra pages — that re-triggers Cloudflare loops.
+                # Only advance if an in-page Next control exists.
+                if not click_next_if_present(page):
+                    logger.info(
+                        "Cars.co.za: no in-page Next (or CF) — keeping %s listings from page 1+",
+                        len(all_listings),
                     )
-                    logger.info("Cars.co.za: soft-navigated to page %s", page_num)
-                else:
                     break
+                html = page.content()
+                logger.info("Cars.co.za: advanced via in-page Next → page %s", page_num)
 
                 if is_cloudflare_challenge(page):
-                    logger.warning("Cars.co.za challenged on page %s — stopping pagination", page_num)
+                    logger.warning(
+                        "Cars.co.za challenged on page %s — keeping earlier results only",
+                        page_num,
+                    )
                     break
 
                 self.snapshot_raw(f"search_p{page_num}", html)

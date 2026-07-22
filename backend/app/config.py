@@ -79,7 +79,8 @@ class Settings(BaseSettings):
     collector_mode: Literal["live", "fixture", "hybrid"] = "fixture"
     use_playwright: bool = True
     playwright_headed: bool = False
-    playwright_user_data_dir: str | None = "./data/chrome-profile"
+    playwright_user_data_dir: str | None = "./data/chrome-profile-cars"
+    playwright_cdp_url: str | None = None  # e.g. http://127.0.0.1:9222
     request_delay_seconds: float = 2.5
     request_timeout_seconds: float = 45.0
     user_agent: str = (
