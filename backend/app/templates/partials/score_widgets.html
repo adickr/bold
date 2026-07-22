@@ -1,0 +1,66 @@
+{# Visual score widgets for listing tables. #}
+
+{% macro deal_tier(score) -%}
+{%- if score is none -%}
+{%- elif score >= 75 -%}hot
+{%- elif score >= 60 -%}good
+{%- elif score >= 45 -%}ok
+{%- else -%}weak
+{%- endif -%}
+{%- endmacro %}
+
+{% macro motivation_rank(level) -%}
+{%- set key = (level or '')|lower|replace(' ', '_') -%}
+{%- if key in ['very_high', 'very-high'] -%}4
+{%- elif key == 'high' -%}3
+{%- elif key in ['moderate', 'medium'] -%}2
+{%- elif key == 'low' -%}1
+{%- else -%}0
+{%- endif -%}
+{%- endmacro %}
+
+{% macro motivation_label(level) -%}
+{%- set key = (level or '')|lower|replace(' ', '_') -%}
+{%- if key == 'very_high' -%}very high
+{%- elif key == 'moderate' -%}moderate
+{%- elif key == 'high' -%}high
+{%- elif key == 'low' -%}low
+{%- else -%}{{ level or '—' }}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro deal_score_widget(score, breakdown=None) -%}
+{%- if score is none -%}
+<span class="score">—</span>
+{%- else -%}
+{%- set pct = score if score < 100 else 100 -%}
+{%- set tier = deal_tier(score) -%}
+<span class="deal-score is-{{ tier }}{% if breakdown %} score-tip{% endif %}"
+      style="--pct: {{ pct }}"
+      {% if breakdown %}tabindex="0" data-tip-kind="deal" data-score-tip="{{ breakdown | tojson | forceescape }}"{% endif %}
+      aria-label="Deal score {{ score }} of 100">
+  <span class="deal-score-dial" aria-hidden="true">
+    <svg viewBox="0 0 36 36">
+      <circle class="deal-score-track" cx="18" cy="18" r="15" pathLength="100"></circle>
+      <circle class="deal-score-value" cx="18" cy="18" r="15" pathLength="100"></circle>
+    </svg>
+    <span class="deal-score-num">{{ score }}</span>
+  </span>
+</span>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro motivation_widget(level, breakdown=None) -%}
+{%- if not level -%}
+<span class="score">—</span>
+{%- else -%}
+{%- set rank = motivation_rank(level) -%}
+<span class="motivation-meter is-l{{ rank }}{% if breakdown %} score-tip motivation-tip{% endif %}"
+      data-level="{{ rank }}"
+      {% if breakdown %}tabindex="0" data-tip-kind="motivation" data-score-tip="{{ breakdown | tojson | forceescape }}"{% endif %}
+      aria-label="Motivation {{ motivation_label(level) }}">
+  <span class="motivation-pips" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+  <span class="motivation-lbl">{{ motivation_label(level) }}</span>
+</span>
+{%- endif -%}
+{%- endmacro %}

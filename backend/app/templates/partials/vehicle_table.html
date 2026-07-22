@@ -1,3 +1,4 @@
+{% from "partials/score_widgets.html" import deal_score_widget, motivation_widget %}
 <div class="table-wrap">
   <table class="listings">
     <thead>
@@ -38,20 +39,8 @@
         <td>{{ v.dealer or '—' }}</td>
         <td>{{ v.days_tracked }}</td>
         <td>{% if v.total_reduction %}{{ v.total_reduction | zar }}{% else %}—{% endif %}</td>
-        <td>
-          {% if v.deal_score is not none and v.deal_score_breakdown %}
-          <span class="score score-tip" tabindex="0" data-score-tip="{{ v.deal_score_breakdown | tojson | forceescape }}">{{ v.deal_score }}</span>
-          {% else %}
-          <span class="score">{{ v.deal_score if v.deal_score is not none else '—' }}</span>
-          {% endif %}
-        </td>
-        <td>
-          {% if v.motivation_level and v.motivation_breakdown %}
-          <span class="score score-tip motivation-tip" tabindex="0" data-tip-kind="motivation" data-score-tip="{{ v.motivation_breakdown | tojson | forceescape }}">{{ v.motivation_level }}</span>
-          {% else %}
-          <span class="score">{{ v.motivation_level or '—' }}</span>
-          {% endif %}
-        </td>
+        <td>{{ deal_score_widget(v.deal_score, v.deal_score_breakdown) }}</td>
+        <td>{{ motivation_widget(v.motivation_level, v.motivation_breakdown) }}</td>
         <td class="links-cell">
           <div class="source-links">
             {% for s in v.sources if s.status in ['active', 'relisted'] and s.url %}

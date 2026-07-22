@@ -1,6 +1,7 @@
 {% extends "partials/base.html" %}
 {% block title %}Shortlist · Fortuner Agent{% endblock %}
 {% block content %}
+{% from "partials/score_widgets.html" import deal_score_widget, motivation_widget %}
 <section class="section-head">
   <h1>Shortlist</h1>
   <p class="lede">Compare interest, contact status, and offers side by side.</p>
@@ -39,8 +40,8 @@
         </td>
         <td>{{ e.canonical_vehicle.current_lowest_price | zar }}</td>
         <td>{% if e.canonical_vehicle.current_mileage_km %}{{ "{:,}".format(e.canonical_vehicle.current_mileage_km) }} km{% else %}—{% endif %}</td>
-        <td>{{ e.canonical_vehicle.deal_score or '—' }}</td>
-        <td>{{ e.canonical_vehicle.motivation_level or '—' }}</td>
+        <td>{{ deal_score_widget(e.canonical_vehicle.deal_score, e.canonical_vehicle.deal_score_breakdown) }}</td>
+        <td>{{ motivation_widget(e.canonical_vehicle.motivation_level, e.canonical_vehicle.motivation_breakdown) }}</td>
         <td>{{ e.status.replace('_', ' ') }}</td>
         <td>{{ e.interest_level }}</td>
         <td>{{ e.offered_price_zar | zar }}</td>

@@ -489,22 +489,65 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       .join("");
   }
 
+  function dealScoreTier(score) {
+    const n = Number(score);
+    if (!Number.isFinite(n)) return "weak";
+    if (n >= 75) return "hot";
+    if (n >= 60) return "good";
+    if (n >= 45) return "ok";
+    return "weak";
+  }
+
+  function motivationRank(level) {
+    const key = String(level || "").toLowerCase().replace(/\s+/g, "_");
+    if (key === "very_high" || key === "very-high") return 4;
+    if (key === "high") return 3;
+    if (key === "moderate" || key === "medium") return 2;
+    if (key === "low") return 1;
+    return 0;
+  }
+
+  function motivationLabel(level) {
+    const key = String(level || "").toLowerCase().replace(/\s+/g, "_");
+    if (key === "very_high") return "very high";
+    if (key === "moderate") return "moderate";
+    if (key === "high") return "high";
+    if (key === "low") return "low";
+    return level || "—";
+  }
+
   function scoreCellHtml(v) {
     if (v.deal_score == null) return `<span class="score">—</span>`;
-    if (!v.deal_score_breakdown) {
-      return `<span class="score">${escapeHtml(v.deal_score)}</span>`;
-    }
-    const payload = escapeHtml(JSON.stringify(v.deal_score_breakdown));
-    return `<span class="score score-tip" tabindex="0" data-tip-kind="deal" data-score-tip="${payload}">${escapeHtml(v.deal_score)}</span>`;
+    const score = v.deal_score;
+    const pct = Math.max(0, Math.min(100, Number(score) || 0));
+    const tier = dealScoreTier(score);
+    const tipClass = v.deal_score_breakdown ? " score-tip" : "";
+    const tipAttrs = v.deal_score_breakdown
+      ? ` tabindex="0" data-tip-kind="deal" data-score-tip="${escapeHtml(JSON.stringify(v.deal_score_breakdown))}"`
+      : "";
+    return `<span class="deal-score is-${tier}${tipClass}"${tipAttrs} style="--pct: ${pct}" aria-label="Deal score ${escapeHtml(score)} of 100">
+      <span class="deal-score-dial" aria-hidden="true">
+        <svg viewBox="0 0 36 36">
+          <circle class="deal-score-track" cx="18" cy="18" r="15" pathLength="100"></circle>
+          <circle class="deal-score-value" cx="18" cy="18" r="15" pathLength="100"></circle>
+        </svg>
+        <span class="deal-score-num">${escapeHtml(score)}</span>
+      </span>
+    </span>`;
   }
 
   function motivationCellHtml(v) {
     if (!v.motivation_level) return `<span class="score">—</span>`;
-    if (!v.motivation_breakdown) {
-      return `<span class="score">${escapeHtml(v.motivation_level)}</span>`;
-    }
-    const payload = escapeHtml(JSON.stringify(v.motivation_breakdown));
-    return `<span class="score score-tip motivation-tip" tabindex="0" data-tip-kind="motivation" data-score-tip="${payload}">${escapeHtml(v.motivation_level)}</span>`;
+    const rank = motivationRank(v.motivation_level);
+    const label = motivationLabel(v.motivation_level);
+    const tipClass = v.motivation_breakdown ? " score-tip motivation-tip" : "";
+    const tipAttrs = v.motivation_breakdown
+      ? ` tabindex="0" data-tip-kind="motivation" data-score-tip="${escapeHtml(JSON.stringify(v.motivation_breakdown))}"`
+      : "";
+    return `<span class="motivation-meter is-l${rank}${tipClass}"${tipAttrs} data-level="${rank}" aria-label="Motivation ${escapeHtml(label)}">
+      <span class="motivation-pips" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span class="motivation-lbl">${escapeHtml(label)}</span>
+    </span>`;
   }
 
   function yearCellHtml(v) {

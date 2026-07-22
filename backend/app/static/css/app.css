@@ -217,13 +217,112 @@ table.listings th { color: var(--muted); font-weight: 500; font-size: 0.75rem; t
   display: inline-flex;
   align-items: center;
   cursor: help;
-  border-bottom: 1px dotted rgba(155, 176, 163, 0.55);
   outline: none;
+}
+.score-tip:not(.deal-score):not(.motivation-meter) {
+  border-bottom: 1px dotted rgba(155, 176, 163, 0.55);
 }
 .score-tip:hover,
 .score-tip:focus-visible {
   color: var(--accent-2);
 }
+
+.deal-score {
+  --pct: 0;
+  --ring: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+.deal-score.is-hot { --ring: var(--accent-2); }
+.deal-score.is-good { --ring: #9bc27a; }
+.deal-score.is-ok { --ring: var(--accent); }
+.deal-score.is-weak { --ring: var(--danger); }
+.deal-score-dial {
+  position: relative;
+  width: 2.35rem;
+  height: 2.35rem;
+  display: grid;
+  place-items: center;
+}
+.deal-score-dial svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.deal-score-track,
+.deal-score-value {
+  fill: none;
+  stroke-width: 3.25;
+}
+.deal-score-track {
+  stroke: rgba(155, 176, 163, 0.18);
+}
+.deal-score-value {
+  stroke: var(--ring);
+  stroke-linecap: round;
+  stroke-dasharray: var(--pct) 100;
+  transition: stroke-dasharray 0.45s ease, stroke 0.25s ease;
+}
+.deal-score-num {
+  position: relative;
+  z-index: 1;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--ink);
+}
+.deal-score.score-tip:hover .deal-score-num,
+.deal-score.score-tip:focus-visible .deal-score-num {
+  color: var(--ring);
+}
+
+.motivation-meter {
+  display: inline-grid;
+  gap: 0.22rem;
+  justify-items: start;
+  vertical-align: middle;
+  min-width: 3.4rem;
+}
+.motivation-pips {
+  display: flex;
+  gap: 0.18rem;
+  align-items: center;
+}
+.motivation-pips i {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 2px;
+  background: rgba(155, 176, 163, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(155, 176, 163, 0.18);
+}
+.motivation-meter.is-l1 .motivation-pips i:nth-child(-n+1),
+.motivation-meter.is-l2 .motivation-pips i:nth-child(-n+2),
+.motivation-meter.is-l3 .motivation-pips i:nth-child(-n+3),
+.motivation-meter.is-l4 .motivation-pips i:nth-child(-n+4) {
+  background: var(--accent);
+  box-shadow: none;
+}
+.motivation-meter.is-l3 .motivation-pips i:nth-child(-n+3),
+.motivation-meter.is-l4 .motivation-pips i:nth-child(-n+4) {
+  background: var(--accent-2);
+}
+.motivation-lbl {
+  font-size: 0.68rem;
+  line-height: 1;
+  color: var(--muted);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.motivation-meter.score-tip:hover .motivation-lbl,
+.motivation-meter.score-tip:focus-visible .motivation-lbl {
+  color: var(--ink);
+}
+
 .score-tip-float {
   position: fixed;
   z-index: 80;
