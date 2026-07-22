@@ -142,7 +142,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     const values = known.map((p) => Number(p.value));
     const min = Math.min(...values);
     const max = Math.max(...values);
-    const pad = max === min ? Math.max(2, Math.round(max * 0.05)) : 0;
+    const pad = max === min ? Math.max(2, Math.round(max * 0.05) || 2) : 0;
     const lo = min - pad;
     const hi = max + pad || 1;
     const w = 280;
@@ -161,7 +161,10 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       return [x, y];
     }
 
-    const linePts = known.map((p) => xy(p.idx, p.value));
+    // One datapoint → flat line across the window so the chart still reads as a chart
+    const linePts = known.length === 1
+      ? [xy(0, known[0].value), xy(n, known[0].value)]
+      : known.map((p) => xy(p.idx, p.value));
     const line = linePts.map((pt, i) => `${i === 0 ? "M" : "L"}${pt[0].toFixed(1)} ${pt[1].toFixed(1)}`).join(" ");
     const first = linePts[0];
     const last = linePts[linePts.length - 1];
