@@ -38,11 +38,13 @@
         </td>
         <td>{{ v.motivation_level or '—' }}</td>
         <td class="links-cell">
-          {% for s in v.sources if s.status in ['active', 'relisted'] and s.url %}
-            <a class="btn-link external" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>
-          {% else %}
-            —
-          {% endfor %}
+          <div class="source-links">
+            {% for s in v.sources if s.status in ['active', 'relisted'] and s.url %}
+              <a class="btn-link external" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>
+            {% else %}
+              <span class="muted">—</span>
+            {% endfor %}
+          </div>
         </td>
         <td>{{ v.shortlist_status or '—' }}</td>
       </tr>

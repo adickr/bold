@@ -420,6 +420,9 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       .filter((s) => s.url)
       .map((s) => `<a class="btn-link external" href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.label || s.source)}</a>`)
       .join("");
+    const linksHtml = sources
+      ? `<div class="source-links">${sources}</div>`
+      : `<div class="source-links"><span class="muted">—</span></div>`;
     return `<tr data-vehicle-id="${escapeHtml(v.id)}" class="${isNew ? "is-new-listing" : ""}">
       <td>${escapeHtml(v.year || "—")}</td>
       <td>
@@ -433,7 +436,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       <td>${v.total_reduction ? zar(v.total_reduction) : "—"}</td>
       <td>${scoreCellHtml(v)}</td>
       <td>${escapeHtml(v.motivation_level || "—")}</td>
-      <td class="links-cell">${sources || "—"}</td>
+      <td class="links-cell">${linksHtml}</td>
       <td>${escapeHtml(v.shortlist_status || "—")}</td>
     </tr>`;
   }
