@@ -91,8 +91,8 @@ def test_autotrader_wc_annotate_fills_empty_location():
     assert rows[0].drivetrain == "4x4"
 
 
-def test_autotrader_annotates_4x4_when_slug_omits_it():
-    """Live AT SEO slugs often look like /2.8gd-6/{id} even for 4x4 stock."""
+def test_autotrader_keeps_4x4_when_title_has_it_even_if_slug_omits():
+    """Slug /2.8gd-6/{id} is fine if variant/title explicitly says 4x4."""
     c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
     rows = c._annotate_search_scope(
         [
@@ -109,6 +109,28 @@ def test_autotrader_annotates_4x4_when_slug_omits_it():
     )
     assert len(rows) == 1
     assert rows[0].drivetrain == "4x4"
+
+
+def test_autotrader_drops_when_neither_slug_nor_title_says_4x4():
+    """Knysna 28658500-style SEO URL with no 4x4 signal must not be assumed 4x4."""
+    c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
+    rows = c._annotate_search_scope(
+        [
+            ListingPayload(
+                source="autotrader",
+                source_listing_id="28658500",
+                url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28658500",
+                title="2024 Toyota Fortuner 2.8GD-6 VX",
+                variant_raw="2.8GD-6 VX",
+                price_zar=669900,
+                mileage_km=18000,
+                make="Toyota",
+                model="Fortuner",
+                drivetrain="4x4",  # stale search-scope tag
+            )
+        ]
+    )
+    assert rows == []
 
 
 def test_autotrader_parses_embedded_search_json():

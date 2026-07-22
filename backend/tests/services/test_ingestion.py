@@ -207,6 +207,54 @@ def test_stale_price_event_does_not_invent_reduction(db_session):
     assert vehicle.current_lowest_price == 779900
 
 
+def test_purge_removes_autotrader_without_explicit_4x4(db_session):
+    """AT /2.8gd-6/{id} with no 4x4 in title must leave the board."""
+    from datetime import datetime, timezone
+
+    from app.models.entities import CanonicalVehicle, ListingStatus, SourceListing
+
+    settings = get_settings()
+    service = IngestionService(db_session, settings)
+    now = datetime.now(timezone.utc)
+    vehicle = CanonicalVehicle(
+        year=2024,
+        make="Toyota",
+        model="Fortuner",
+        drivetrain="4x4",
+        current_lowest_price=669900,
+        deal_score=95,
+        is_active=True,
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    db_session.add(vehicle)
+    db_session.flush()
+    db_session.add(
+        SourceListing(
+            source="autotrader",
+            source_listing_id="28658500",
+            url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28658500",
+            title="2024 Toyota Fortuner 2.8GD-6 VX",
+            variant_raw="2.8GD-6 VX",
+            year=2024,
+            price_zar=669900,
+            mileage_km=18000,
+            drivetrain="4x4",
+            listing_status=ListingStatus.ACTIVE.value,
+            canonical_vehicle_id=vehicle.id,
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+    )
+    db_session.commit()
+
+    removed = service._purge_listings_failing_criteria()
+    db_session.commit()
+    db_session.refresh(vehicle)
+    assert removed == 1
+    assert vehicle.is_active is False
+
+
 def test_purge_removes_cars_co_za_mhev_without_4x4(db_session):
     """Tygervalley mHev demo must leave the active board even if wrongly tagged 4x4."""
     from datetime import datetime, timezone
@@ -238,7 +286,7 @@ def test_purge_removes_cars_co_za_mhev_without_4x4(db_session):
             year=2026,
             price_zar=779900,
             mileage_km=2500,
-            drivetrain="4x4",  # false tag from old collector
+            drivetrain="4x4",
             listing_status=ListingStatus.ACTIVE.value,
             canonical_vehicle_id=vehicle.id,
             first_seen_at=now,

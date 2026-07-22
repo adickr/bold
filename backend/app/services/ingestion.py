@@ -333,15 +333,28 @@ class IngestionService:
                         vehicle.drivetrain = listing.drivetrain
 
     def _payload_from_listing(self, listing: SourceListing) -> ListingPayload:
-        """Rebuild a criteria payload; re-detect Cars.co.za axle from URL/title."""
+        """Rebuild a criteria payload; re-detect axle from URL/title (ignore stale 4x4 tags)."""
         drivetrain = listing.drivetrain
         if listing.source == "cars_co_za":
             from app.collectors.cars_co_za import CarsCoZaCollector
 
-            detected = CarsCoZaCollector._drivetrain_from_text(
+            drivetrain = CarsCoZaCollector._drivetrain_from_text(
                 listing.url, listing.title, listing.variant_raw
             )
-            drivetrain = detected  # None when slug omits 4x4 — reject as unclear
+        elif listing.source == "autotrader":
+            from app.collectors.autotrader import AutoTraderCollector
+            from app.services.normalise import detect_drivetrain
+
+            url_dt = AutoTraderCollector.drivetrain_from_url(listing.url)
+            text_dt = detect_drivetrain(
+                " ".join(filter(None, [listing.title, listing.variant_raw]))
+            )
+            if url_dt == "4x2" or text_dt == "4x2":
+                drivetrain = "4x2"
+            elif url_dt == "4x4" or text_dt == "4x4":
+                drivetrain = "4x4"
+            else:
+                drivetrain = None  # stale search-scope 4x4 tag — reject
         return ListingPayload(
             source=listing.source,
             source_listing_id=listing.source_listing_id,
