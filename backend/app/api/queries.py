@@ -10,7 +10,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
-from app.models.entities import CanonicalVehicle, CollectorRun, ListingObservation, PriceEvent, SourceListing
+from app.models.entities import CanonicalVehicle, CollectorRun, ListingObservation, PriceEvent, SourceListing, ShortlistEntry, ShortlistStatus
 from app.schemas.listings import DashboardStats, VehicleFilterParams
 from app.services.media import absolute_url, is_valid_marketplace_url, normalise_listing_url, source_label
 
@@ -136,14 +136,28 @@ def _drivetrain_matches(value: str | None, wanted: str) -> bool:
     return right in left
 
 
+def vote_from_shortlist(entry: ShortlistEntry | None) -> str | None:
+    if entry is None:
+        return None
+    if entry.status == ShortlistStatus.REJECTED.value:
+        return "down"
+    return "up"
+
+
 def sort_vehicles(vehicles: list[CanonicalVehicle], sort: str) -> list[CanonicalVehicle]:
     key = (sort or "deal_score_desc").strip().lower()
     # Unknown mileage is kept in results but demoted below known-mileage cars
     unknown_mileage = lambda v: v.current_mileage_km is None
+    # Thumbs-down always sink to the bottom of any sort
+    thumbs_down = lambda v: (
+        v.shortlist_entry is not None
+        and v.shortlist_entry.status == ShortlistStatus.REJECTED.value
+    )
     if key == "price_desc":
         return sorted(
             vehicles,
             key=lambda v: (
+                thumbs_down(v),
                 v.current_lowest_price is None,
                 unknown_mileage(v),
                 -(v.current_lowest_price or 0),
@@ -153,6 +167,7 @@ def sort_vehicles(vehicles: list[CanonicalVehicle], sort: str) -> list[Canonical
         return sorted(
             vehicles,
             key=lambda v: (
+                thumbs_down(v),
                 v.current_mileage_km is None,
                 v.current_mileage_km or 0,
             ),
@@ -161,6 +176,7 @@ def sort_vehicles(vehicles: list[CanonicalVehicle], sort: str) -> list[Canonical
         return sorted(
             vehicles,
             key=lambda v: (
+                thumbs_down(v),
                 v.current_lowest_price is None,
                 unknown_mileage(v),
                 v.current_lowest_price or 0,
@@ -170,6 +186,7 @@ def sort_vehicles(vehicles: list[CanonicalVehicle], sort: str) -> list[Canonical
         return sorted(
             vehicles,
             key=lambda v: (
+                thumbs_down(v),
                 v.year is None,
                 unknown_mileage(v),
                 -(v.year or 0),
@@ -179,6 +196,7 @@ def sort_vehicles(vehicles: list[CanonicalVehicle], sort: str) -> list[Canonical
     return sorted(
         vehicles,
         key=lambda v: (
+            thumbs_down(v),
             v.deal_score is None,
             unknown_mileage(v),
             -(v.deal_score or 0),
@@ -268,6 +286,7 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
         "motivation_level": v.motivation_level,
         "source_count": v.source_count,
         "shortlist_status": shortlist.status if shortlist else None,
+        "vote": vote_from_shortlist(shortlist),
         "is_stretch": v.is_stretch_candidate,
         "image": image_candidates[0] if image_candidates else None,
         "images": image_candidates[:8],
@@ -337,7 +356,9 @@ def filter_vehicles(db: Session, params: VehicleFilterParams) -> list[CanonicalV
         ]
 
     if params.shortlisted:
-        vehicles = [v for v in vehicles if v.shortlist_entry is not None]
+        vehicles = [
+            v for v in vehicles if vote_from_shortlist(v.shortlist_entry) == "up"
+        ]
     if params.new_only:
         since = datetime.now(timezone.utc) - timedelta(hours=24)
         vehicles = [

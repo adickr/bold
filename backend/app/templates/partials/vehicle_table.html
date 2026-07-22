@@ -13,12 +13,12 @@
         <th>Deal</th>
         <th>Motivation</th>
         <th>Links</th>
-        <th>Shortlist</th>
+        <th>Vote</th>
       </tr>
     </thead>
     <tbody data-live-tbody>
       {% for v in vehicles %}
-      <tr data-vehicle-id="{{ v.id }}">
+      <tr data-vehicle-id="{{ v.id }}" class="{% if v.vote == 'down' %}is-thumbs-down{% elif v.vote == 'up' %}is-thumbs-up{% endif %}" data-vote="{{ v.vote or '' }}">
         <td>{{ v.year or '—' }}</td>
         <td>
           <a href="{{ v.detail_path }}"><strong>{{ v.variant or 'Fortuner' }}</strong>{% if v.is_stretch %} <em class="tag">stretch</em>{% endif %}</a>
@@ -46,7 +46,12 @@
             {% endfor %}
           </div>
         </td>
-        <td>{{ v.shortlist_status or '—' }}</td>
+        <td class="vote-cell">
+          <div class="vote-controls" data-vote-controls data-vehicle-id="{{ v.id }}">
+            <button type="button" class="vote-btn vote-up {% if v.vote == 'up' %}is-active{% endif %}" data-vote="up" aria-label="Thumbs up" aria-pressed="{{ 'true' if v.vote == 'up' else 'false' }}">👍</button>
+            <button type="button" class="vote-btn vote-down {% if v.vote == 'down' %}is-active{% endif %}" data-vote="down" aria-label="Thumbs down" aria-pressed="{{ 'true' if v.vote == 'down' else 'false' }}">👎</button>
+          </div>
+        </td>
       </tr>
 {% else %}
       <tr>

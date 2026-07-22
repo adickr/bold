@@ -66,6 +66,74 @@ class ShortlistService:
         self.db.refresh(entry)
         return entry
 
+    def set_vote(self, vehicle_id: int, vote: str | None) -> ShortlistEntry | None:
+        """Set thumbs-up / thumbs-down / clear for a vehicle.
+
+        up → interested shortlist entry
+        down → rejected
+        None → remove shortlist entry
+        """
+        vehicle = self.db.get(CanonicalVehicle, vehicle_id)
+        if not vehicle:
+            raise ValueError("Vehicle not found")
+
+        existing = self.db.execute(
+            select(ShortlistEntry).where(ShortlistEntry.canonical_vehicle_id == vehicle_id)
+        ).scalar_one_or_none()
+
+        normalised = (vote or "").strip().lower() or None
+        if normalised not in {None, "up", "down"}:
+            raise ValueError("vote must be up, down, or empty")
+
+        if normalised is None:
+            if existing:
+                self.remove(existing.id)
+            return None
+
+        status = (
+            ShortlistStatus.INTERESTED.value
+            if normalised == "up"
+            else ShortlistStatus.REJECTED.value
+        )
+        interest = 5 if normalised == "up" else 1
+        if existing:
+            existing.status = status
+            existing.interest_level = interest
+            if normalised == "down":
+                existing.rejection_reason = existing.rejection_reason or "thumbs_down"
+            self.db.add(
+                AuditLog(
+                    action="shortlist_vote",
+                    entity_type="shortlist_entry",
+                    entity_id=existing.id,
+                    details={"vote": normalised, "status": status},
+                )
+            )
+            self.db.commit()
+            self.db.refresh(existing)
+            return existing
+
+        entry = ShortlistEntry(
+            canonical_vehicle_id=vehicle_id,
+            status=status,
+            interest_level=interest,
+            rejection_reason="thumbs_down" if normalised == "down" else None,
+        )
+        self.db.add(entry)
+        self.db.add(
+            AuditLog(
+                action="shortlist_vote",
+                entity_type="canonical_vehicle",
+                entity_id=vehicle_id,
+                details={"vote": normalised, "status": status},
+            )
+        )
+        if normalised == "up":
+            entry.draft_message = draft_dealer_message(vehicle)
+        self.db.commit()
+        self.db.refresh(entry)
+        return entry
+
     def list_entries(self) -> list[ShortlistEntry]:
         return list(
             self.db.execute(
@@ -76,6 +144,13 @@ class ShortlistService:
             .scalars()
             .all()
         )
+
+    def list_upvoted(self) -> list[ShortlistEntry]:
+        return [
+            e
+            for e in self.list_entries()
+            if e.status != ShortlistStatus.REJECTED.value
+        ]
 
     def remove(self, entry_id: int) -> None:
         entry = self.db.get(ShortlistEntry, entry_id)

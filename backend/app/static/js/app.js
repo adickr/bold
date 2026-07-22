@@ -423,7 +423,13 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     const linksHtml = sources
       ? `<div class="source-links">${sources}</div>`
       : `<div class="source-links"><span class="muted">—</span></div>`;
-    return `<tr data-vehicle-id="${escapeHtml(v.id)}" class="${isNew ? "is-new-listing" : ""}">
+    const vote = v.vote || "";
+    const rowClass = [
+      isNew ? "is-new-listing" : "",
+      vote === "down" ? "is-thumbs-down" : "",
+      vote === "up" ? "is-thumbs-up" : "",
+    ].filter(Boolean).join(" ");
+    return `<tr data-vehicle-id="${escapeHtml(v.id)}" class="${rowClass}" data-vote="${escapeHtml(vote)}">
       <td>${escapeHtml(v.year || "—")}</td>
       <td>
         <a href="${escapeHtml(v.detail_path)}"><strong>${escapeHtml(v.variant || "Fortuner")}</strong>${v.is_stretch ? ' <em class="tag">stretch</em>' : ""}</a>
@@ -437,7 +443,12 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       <td>${scoreCellHtml(v)}</td>
       <td>${escapeHtml(v.motivation_level || "—")}</td>
       <td class="links-cell">${linksHtml}</td>
-      <td>${escapeHtml(v.shortlist_status || "—")}</td>
+      <td class="vote-cell">
+        <div class="vote-controls" data-vote-controls data-vehicle-id="${escapeHtml(v.id)}">
+          <button type="button" class="vote-btn vote-up${vote === "up" ? " is-active" : ""}" data-vote="up" aria-label="Thumbs up" aria-pressed="${vote === "up" ? "true" : "false"}">👍</button>
+          <button type="button" class="vote-btn vote-down${vote === "down" ? " is-active" : ""}" data-vote="down" aria-label="Thumbs down" aria-pressed="${vote === "down" ? "true" : "false"}">👎</button>
+        </div>
+      </td>
     </tr>`;
   }
 
@@ -656,5 +667,58 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
   );
   window.addEventListener("resize", () => {
     if (activeEl && !tip.hidden) placeTip(activeEl);
+  });
+})();
+
+(function voteControls() {
+  function applyVoteToRow(row, vote) {
+    row.dataset.vote = vote || "";
+    row.classList.toggle("is-thumbs-down", vote === "down");
+    row.classList.toggle("is-thumbs-up", vote === "up");
+    row.querySelectorAll(".vote-btn").forEach((btn) => {
+      const active = btn.getAttribute("data-vote") === vote;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  function moveThumbsDownToBottom(tbody) {
+    if (!tbody) return;
+    const downs = Array.from(tbody.querySelectorAll("tr[data-vote='down']"));
+    downs.forEach((row) => tbody.appendChild(row));
+  }
+
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".vote-btn");
+    if (!btn) return;
+    const controls = btn.closest("[data-vote-controls]");
+    if (!controls) return;
+    e.preventDefault();
+    const vehicleId = controls.getAttribute("data-vehicle-id");
+    const vote = btn.getAttribute("data-vote");
+    if (!vehicleId || !vote) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/vehicles/${vehicleId}/vote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ vote }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Vote failed");
+      const row = controls.closest("tr");
+      if (row) {
+        applyVoteToRow(row, data.vote);
+        if (data.vote === "down") {
+          const tbody = row.parentElement;
+          moveThumbsDownToBottom(tbody);
+        }
+      }
+    } catch (_err) {
+      btn.classList.add("vote-error");
+      setTimeout(() => btn.classList.remove("vote-error"), 800);
+    } finally {
+      btn.disabled = false;
+    }
   });
 })();

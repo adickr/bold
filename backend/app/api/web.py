@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from pydantic import BaseModel, Field
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -21,6 +22,7 @@ from app.api.queries import (
     default_buyer_filters,
     filter_vehicles,
     vehicle_to_dict,
+    vote_from_shortlist,
 )
 from app.db.session import get_db
 from app.models.entities import CanonicalVehicle, ShortlistEntry
@@ -281,6 +283,45 @@ def page_add_shortlist(
     return RedirectResponse(f"/vehicles/{vehicle_id}", status_code=303)
 
 
+class VoteBody(BaseModel):
+    vote: str | None = Field(default=None, description="up, down, or null/clear")
+
+
+@router.post("/vehicles/{vehicle_id}/vote")
+def page_vote_vehicle(
+    vehicle_id: int,
+    data: VoteBody,
+    db: Session = Depends(get_db),
+    user: str = Depends(require_web_user),
+):
+    """Thumbs up / down for a listing. Clicking the same vote again clears it."""
+    raw = (data.vote or "").strip().lower()
+    if raw in {"", "clear", "none", "null"}:
+        normalised: str | None = None
+    elif raw in {"up", "down"}:
+        normalised = raw
+    else:
+        return JSONResponse({"ok": False, "error": "invalid vote"}, status_code=400)
+
+    svc = ShortlistService(db)
+    existing = db.execute(
+        select(ShortlistEntry).where(ShortlistEntry.canonical_vehicle_id == vehicle_id)
+    ).scalar_one_or_none()
+    current = vote_from_shortlist(existing)
+    if normalised is not None and current == normalised:
+        normalised = None
+    try:
+        entry = svc.set_vote(vehicle_id, normalised)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    return {
+        "ok": True,
+        "vote": vote_from_shortlist(entry),
+        "shortlist_status": entry.status if entry else None,
+        "shortlist_id": entry.id if entry else None,
+    }
+
+
 @router.post("/shortlist/{entry_id}/update")
 def page_update_shortlist(
     entry_id: int,
@@ -313,7 +354,7 @@ def page_update_shortlist(
 def page_shortlist(
     request: Request, db: Session = Depends(get_db), user: str = Depends(require_web_user)
 ):
-    entries = ShortlistService(db).list_entries()
+    entries = ShortlistService(db).list_upvoted()
     return templates.TemplateResponse(
         request,
         "pages/shortlist.html",
