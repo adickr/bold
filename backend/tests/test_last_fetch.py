@@ -79,6 +79,10 @@ def test_last_fetch_summary_reports_changes(db_session):
     assert summary["has_changes"] is True
     assert "new" in summary["summary"]
     assert summary["highlights"]
+    assert summary["changes"]["new"]
+    assert summary["changes"]["price_cuts"]
+    assert summary["changes"]["new"][0]["href"].startswith("/vehicles/")
+    assert summary["changes"]["price_cuts"][0]["change_label"].startswith("−R")
 
 
 def test_last_fetch_summary_no_runs(db_session):

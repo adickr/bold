@@ -155,12 +155,16 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     return `${absolute} (${relative})`;
   }
 
+  let lastFetchState = null;
+
   function renderLastFetch(lastFetch) {
+    lastFetchState = lastFetch || null;
     const root = document.querySelector("[data-fetch-meta]");
     if (!root) return;
     const empty = root.querySelector("[data-fetch-empty]");
     let line = root.querySelector(".fetch-line:not([data-fetch-empty])");
     const highlights = root.querySelector("[data-fetch-highlights]");
+    const dialog = document.querySelector("[data-changes-dialog]");
 
     if (!lastFetch || !lastFetch.last_fetch_at) {
       if (line && !line.matches("[data-fetch-empty]")) line.remove();
@@ -177,6 +181,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
         highlights.innerHTML = "";
         highlights.hidden = true;
       }
+      renderChangesDialog(null);
       return;
     }
 
@@ -187,11 +192,14 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       line.innerHTML = `<span class="muted">Last fetch</span>
         <time class="mono" data-fetch-at></time>
         <span class="fetch-sep">·</span>
-        <span class="fetch-changes" data-fetch-changes></span>`;
+        <span class="fetch-changes" data-fetch-changes></span>
+        <button type="button" class="btn-ghost" data-what-changed-btn>What changed</button>`;
       root.prepend(line);
+      wireWhatChangedButton(line.querySelector("[data-what-changed-btn]"));
     }
     const timeEl = line.querySelector("[data-fetch-at]");
     const changesEl = line.querySelector("[data-fetch-changes]");
+    const btn = line.querySelector("[data-what-changed-btn]");
     if (timeEl) {
       timeEl.setAttribute("datetime", lastFetch.last_fetch_at);
       timeEl.textContent = formatFetchTime(lastFetch.last_fetch_at);
@@ -200,6 +208,11 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       changesEl.textContent = lastFetch.summary || (lastFetch.has_changes ? "Changes found" : "No listing changes in the last scan");
       changesEl.classList.toggle("has-changes", !!lastFetch.has_changes);
       changesEl.classList.toggle("no-changes", !lastFetch.has_changes);
+    }
+    if (btn) {
+      btn.hidden = false;
+      if (lastFetch.has_changes) btn.removeAttribute("data-quiet");
+      else btn.setAttribute("data-quiet", "");
     }
     if (highlights) {
       const items = lastFetch.highlights || [];
@@ -217,7 +230,109 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
           .join("");
       }
     }
+    renderChangesDialog(lastFetch);
+    if (dialog && dialog.open) {
+      // keep open content fresh during live collect
+    }
   }
+
+  function fmtKm(value) {
+    if (value == null || value === "") return "";
+    return `${Number(value).toLocaleString("en-ZA").replace(/,/g, " ")} km`;
+  }
+
+  function renderChangesDialog(lastFetch) {
+    const body = document.querySelector("[data-changes-body]");
+    const summaryEl = document.querySelector("[data-changes-summary]");
+    if (!body) return;
+
+    if (!lastFetch || !lastFetch.last_fetch_at) {
+      if (summaryEl) summaryEl.textContent = "No fetch yet";
+      body.innerHTML = `<p class="muted" data-changes-empty>Run a collect to see what changed.</p>`;
+      return;
+    }
+
+    const when = formatFetchTime(lastFetch.last_fetch_at);
+    if (summaryEl) {
+      summaryEl.innerHTML = `${escapeHtml(lastFetch.summary || "")} · last fetch <time datetime="${escapeHtml(lastFetch.last_fetch_at)}">${escapeHtml(when)}</time>`;
+    }
+
+    const changes = lastFetch.changes || {};
+    const newItems = changes.new || [];
+    const cutItems = changes.price_cuts || [];
+    if (!lastFetch.has_changes) {
+      body.innerHTML = `<p class="muted" data-changes-empty>No listing changes in the last scan.</p>`;
+      return;
+    }
+
+    let html = "";
+    if (newItems.length) {
+      html += `<section><h3>New listings <span class="mono">${escapeHtml(lastFetch.new ?? newItems.length)}</span></h3><ul class="changes-list">`;
+      html += newItems
+        .map((item) => {
+          const metaBits = [fmtKm(item.mileage), item.location].filter(Boolean).join(" · ");
+          return `<li><a href="${escapeHtml(item.href || "#")}"><strong>${escapeHtml(item.title || "Fortuner")}</strong><span class="mono">${escapeHtml(item.price_label || "—")}</span>${metaBits ? `<span class="muted tiny">${escapeHtml(metaBits)}</span>` : ""}</a></li>`;
+        })
+        .join("");
+      html += `</ul></section>`;
+    }
+    if (cutItems.length) {
+      html += `<section><h3>Price cuts <span class="mono">${escapeHtml(lastFetch.price_cuts ?? cutItems.length)}</span></h3><ul class="changes-list">`;
+      html += cutItems
+        .map((item) => {
+          const priceBit = item.change_label
+            ? `${escapeHtml(item.change_label)}${item.price_label ? ` → ${escapeHtml(item.price_label)}` : ""}`
+            : escapeHtml(item.price_label || "—");
+          const loc = item.location ? `<span class="muted tiny">${escapeHtml(item.location)}</span>` : "";
+          return `<li data-kind="cut"><a href="${escapeHtml(item.href || "#")}"><strong>${escapeHtml(item.title || "Fortuner")}</strong><span class="mono cut">${priceBit}</span>${loc}</a></li>`;
+        })
+        .join("");
+      html += `</ul></section>`;
+    }
+    const updated = Number(lastFetch.updated || 0);
+    if (updated && !newItems.length && !cutItems.length) {
+      html += `<p class="muted">${updated} listing${updated === 1 ? "" : "s"} re-checked with no new stock or price cuts to list.</p>`;
+    } else if (updated && (newItems.length || cutItems.length)) {
+      html += `<p class="muted tiny">Also ${updated} existing listing${updated === 1 ? "" : "s"} re-checked without a price move.</p>`;
+    }
+    if (!html) {
+      html = `<p class="muted" data-changes-empty>Changes were counted but no detail rows are available yet.</p>`;
+    }
+    body.innerHTML = html;
+  }
+
+  function openChangesDialog() {
+    const dialog = document.querySelector("[data-changes-dialog]");
+    if (!dialog) return;
+    renderChangesDialog(lastFetchState);
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  }
+
+  function wireWhatChangedButton(btn) {
+    if (!btn || btn.dataset.bound === "1") return;
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      openChangesDialog();
+    });
+  }
+
+  document.querySelectorAll("[data-what-changed-btn]").forEach(wireWhatChangedButton);
+
+  // Seed dialog state from server-rendered JSON
+  (function seedLastFetchFromDom() {
+    const raw = document.querySelector("[data-last-fetch-json]");
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw.textContent || "null");
+      if (parsed && parsed.last_fetch_at) {
+        lastFetchState = parsed;
+      }
+    } catch (_err) {
+      /* ignore malformed bootstrap payload */
+    }
+  })();
 
   // Format any server-rendered last-fetch timestamp on load
   document.querySelectorAll("[data-fetch-at]").forEach((el) => {

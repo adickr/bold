@@ -420,57 +420,27 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
         or 0
     )
 
-    # Highlight a few concrete changes for the dashboard strip
+    new_items, cut_items = _fetch_change_items(db, session_start)
+    # Compact chips for the dashboard strip
     highlights: list[dict[str, Any]] = []
-    new_vehicles = (
-        db.execute(
-            select(CanonicalVehicle)
-            .where(
-                CanonicalVehicle.is_active.is_(True),
-                CanonicalVehicle.first_seen_at >= session_start,
-            )
-            .options(selectinload(CanonicalVehicle.source_listings))
-            .order_by(CanonicalVehicle.first_seen_at.desc())
-            .limit(4)
-        )
-        .scalars()
-        .all()
-    )
-    for v in new_vehicles:
+    for item in new_items[:3]:
         highlights.append(
             {
                 "kind": "new",
-                "label": f"New · {v.year or ''} {v.variant_normalised or 'Fortuner'}".strip(),
-                "detail": f"R{(v.current_lowest_price or 0):,}".replace(",", " ")
-                if v.current_lowest_price
-                else None,
-                "href": f"/vehicles/{v.id}",
+                "label": f"New · {item['title']}",
+                "detail": item.get("price_label"),
+                "href": item["href"],
             }
         )
-
-    cut_events = list(
-        db.execute(
-            select(PriceEvent)
-            .where(PriceEvent.observed_at >= session_start, PriceEvent.change_zar < 0)
-            .order_by(PriceEvent.observed_at.desc())
-            .limit(4)
-        )
-        .scalars()
-        .all()
-    )
-    for event in cut_events:
+    for item in cut_items:
         if len(highlights) >= 6:
             break
-        vehicle = db.get(CanonicalVehicle, event.canonical_vehicle_id) if event.canonical_vehicle_id else None
-        if not vehicle:
-            continue
-        drop = abs(int(event.change_zar or 0))
         highlights.append(
             {
                 "kind": "cut",
-                "label": f"Price cut · {vehicle.year or ''} {vehicle.variant_normalised or 'Fortuner'}".strip(),
-                "detail": f"−R{drop:,}".replace(",", " "),
-                "href": f"/vehicles/{vehicle.id}",
+                "label": f"Price cut · {item['title']}",
+                "detail": item.get("change_label"),
+                "href": item["href"],
             }
         )
 
@@ -486,8 +456,93 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
         "sources_total": sources_total,
         "has_changes": has_changes,
         "highlights": highlights,
+        "changes": {
+            "new": new_items,
+            "price_cuts": cut_items,
+        },
         "summary": _fetch_change_summary(new_count, updated_count, price_cuts, has_changes),
     }
+
+
+def _fmt_zar_spaces(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return f"R{int(value):,}".replace(",", " ")
+
+
+def _vehicle_change_title(vehicle: CanonicalVehicle) -> str:
+    return f"{vehicle.year or ''} {vehicle.variant_normalised or 'Fortuner'}".strip()
+
+
+def _fetch_change_items(
+    db: Session, session_start: datetime
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Concrete new listings and price cuts from the last collect wave."""
+    new_vehicles = (
+        db.execute(
+            select(CanonicalVehicle)
+            .where(
+                CanonicalVehicle.is_active.is_(True),
+                CanonicalVehicle.first_seen_at >= session_start,
+            )
+            .order_by(CanonicalVehicle.first_seen_at.desc())
+            .limit(40)
+        )
+        .scalars()
+        .all()
+    )
+    new_items: list[dict[str, Any]] = []
+    for v in new_vehicles:
+        new_items.append(
+            {
+                "kind": "new",
+                "id": v.id,
+                "title": _vehicle_change_title(v),
+                "price": v.current_lowest_price,
+                "price_label": _fmt_zar_spaces(v.current_lowest_price),
+                "mileage": v.current_mileage_km,
+                "location": v.primary_location,
+                "href": f"/vehicles/{v.id}",
+            }
+        )
+
+    cut_events = list(
+        db.execute(
+            select(PriceEvent)
+            .where(PriceEvent.observed_at >= session_start, PriceEvent.change_zar < 0)
+            .order_by(PriceEvent.observed_at.desc())
+            .limit(40)
+        )
+        .scalars()
+        .all()
+    )
+    cut_items: list[dict[str, Any]] = []
+    seen_vehicle_ids: set[int] = set()
+    for event in cut_events:
+        if not event.canonical_vehicle_id or event.canonical_vehicle_id in seen_vehicle_ids:
+            continue
+        vehicle = db.get(CanonicalVehicle, event.canonical_vehicle_id)
+        if not vehicle:
+            continue
+        seen_vehicle_ids.add(vehicle.id)
+        drop = abs(int(event.change_zar or 0))
+        cut_items.append(
+            {
+                "kind": "cut",
+                "id": vehicle.id,
+                "title": _vehicle_change_title(vehicle),
+                "price": event.new_price_zar or vehicle.current_lowest_price,
+                "price_label": _fmt_zar_spaces(event.new_price_zar or vehicle.current_lowest_price),
+                "old_price": event.old_price_zar,
+                "change_zar": event.change_zar,
+                "change_label": f"−{_fmt_zar_spaces(drop)}" if drop else None,
+                "mileage": vehicle.current_mileage_km,
+                "location": vehicle.primary_location,
+                "href": f"/vehicles/{vehicle.id}",
+            }
+        )
+
+    return new_items, cut_items
 
 
 def _fetch_change_summary(new: int, updated: int, cuts: int, has_changes: bool) -> str:
