@@ -70,6 +70,55 @@ def test_fixture_collectors_return_listings():
         assert len(listings) >= 2
 
 
+def test_fake_reduction_from_price_spread_is_cleared(db_session):
+    """Highest ask among linked ads is not a seller price cut."""
+    from sqlalchemy import select
+
+    from app.models.entities import CanonicalVehicle, ListingStatus, SourceListing
+
+    settings = get_settings()
+    service = IngestionService(db_session, settings)
+
+    vehicle = CanonicalVehicle(
+        year=2023,
+        make="Toyota",
+        model="Fortuner",
+        variant_normalised="2.4GD-6 4x4",
+        drivetrain="4x4",
+        original_price=639900,  # pollution from a different merged car
+        current_lowest_price=539900,
+        total_reduction_zar=100000,  # fake
+        is_active=True,
+    )
+    db_session.add(vehicle)
+    db_session.flush()
+    db_session.add(
+        SourceListing(
+            source="autotrader",
+            source_listing_id="28638215",
+            url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6/28638215",
+            title="2023 Toyota Fortuner 2.4GD-6 4x4",
+            year=2023,
+            make="Toyota",
+            model="Fortuner",
+            drivetrain="4x4",
+            price_zar=539900,
+            mileage_km=90560,
+            dealer_location="Malmesbury, Western Cape",
+            listing_status=ListingStatus.ACTIVE.value,
+            canonical_vehicle_id=vehicle.id,
+        )
+    )
+    db_session.commit()
+
+    service._scrub_all_price_aggregates()
+    db_session.commit()
+    db_session.refresh(vehicle)
+    assert vehicle.total_reduction_zar == 0
+    assert vehicle.original_price == 539900
+    assert vehicle.current_lowest_price == 539900
+
+
 def test_repair_splits_same_source_over_merge(db_session):
     """Distinct AutoTrader ads must not stay glued on one canonical vehicle."""
     from sqlalchemy import select
