@@ -28,11 +28,11 @@ def test_start_collect_job_sets_running_and_finishes():
 
     with patch("app.services.collect_job.run_collector", side_effect=fake_run):
         status = collect_job.start_collect_job()
-        assert status["running"] is True
-        # Wait briefly for daemon thread
+        # Job may still be running or already finished on a fast machine.
+        assert status["running"] is True or status.get("percent") == 100
         import time
 
-        for _ in range(50):
+        for _ in range(100):
             status = collect_job.get_collect_status()
             if not status["running"]:
                 break
