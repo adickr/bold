@@ -1,6 +1,7 @@
 {% extends "partials/base.html" %}
 {% block title %}{{ v.year }} {{ v.variant_normalised }} · Fortuner Agent{% endblock %}
 {% block content %}
+{% from "partials/score_widgets.html" import deal_score_widget, motivation_widget %}
 <section class="detail-hero">
   <div class="detail-copy">
     <p class="eyebrow">{% if v.is_stretch_candidate %}Stretch candidate · {% endif %}{{ v.drivetrain or 'drivetrain unclear' }}</p>
@@ -10,9 +11,15 @@
       <strong>{{ summary.price | zar }}</strong>
       <span>lowest ask across {{ summary.source_count }} source{{ 's' if summary.source_count != 1 else '' }}</span>
     </div>
-    <div class="chip-row">
-      <span>Deal {{ summary.deal_score if summary.deal_score is not none else '—' }}/100 <i>(inferred)</i></span>
-      <span>Motivation {{ summary.motivation_level or '—' }} <i>(estimate)</i></span>
+    <div class="chip-row score-chips">
+      <span class="chip-score">
+        {{ deal_score_widget(summary.deal_score, summary.deal_score_breakdown, 'md') }}
+        <span class="chip-caption">Deal <i>(inferred)</i></span>
+      </span>
+      <span class="chip-score">
+        {{ motivation_widget(summary.motivation_level, summary.motivation_breakdown, 'md') }}
+        <span class="chip-caption">Motivation <i>(estimate)</i></span>
+      </span>
       <span>{{ summary.days_tracked }} days tracked</span>
       {% if summary.total_reduction %}<span>−{{ summary.total_reduction | zar }} total</span>{% endif %}
     </div>
@@ -73,7 +80,7 @@
       <ol class="timeline">
         {% for e in events %}
         <li>
-          <time datetime="{{ e.observed_at }}">{{ e.observed_at }}</time>
+          <time datetime="{{ e.observed_at.isoformat() if e.observed_at else '' }}">{{ e.observed_at }}</time>
           {% if e.old_price_zar is not none %}
             {{ e.old_price_zar | zar }} → {{ e.new_price_zar | zar }}
             <span class="change {% if e.change_zar < 0 %}is-cut{% elif e.change_zar > 0 %}is-hike{% endif %}">({{ e.change_zar | zar }})</span>
@@ -105,6 +112,12 @@
 
   <section>
     <h2>Deal score</h2>
+    {% if v.deal_score is not none %}
+    <div class="score-panel-head">
+      {{ deal_score_widget(v.deal_score, v.deal_score_breakdown, 'lg') }}
+      <p class="muted tiny">Inferred from asking-price listings, not confirmed sales.</p>
+    </div>
+    {% endif %}
     {% if v.deal_score_breakdown %}
     <ul class="score-break">
       {% for k, val in v.deal_score_breakdown.items() if k not in ['note', 'inferred'] %}
@@ -112,20 +125,27 @@
       {% endfor %}
     </ul>
     <p class="muted tiny">{{ v.deal_score_breakdown.note }}</p>
-    {% else %}<p class="muted">Not scored yet.</p>{% endif %}
+    {% elif v.deal_score is none %}<p class="muted">Not scored yet.</p>{% endif %}
   </section>
 
   <section>
     <h2>Motivation estimate</h2>
+    {% if v.motivation_level %}
+    <div class="score-panel-head">
+      {{ motivation_widget(v.motivation_level, v.motivation_breakdown, 'lg') }}
+      {% if v.motivation_score is not none %}
+      <p class="muted tiny">Score {{ v.motivation_score }} / 100</p>
+      {% endif %}
+    </div>
+    {% endif %}
     {% if v.motivation_breakdown %}
-    <p><strong>{{ v.motivation_level }}</strong> ({{ v.motivation_score }})</p>
     <ul class="score-break">
       {% for k, val in v.motivation_breakdown.items() if k not in ['note', 'inferred', 'estimate_only', 'reasons', 'level', 'score'] %}
       <li><span>{{ k.replace('_', ' ') }}</span><strong>{{ val }}</strong></li>
       {% endfor %}
     </ul>
     <p class="muted tiny">{{ v.motivation_breakdown.note }}</p>
-    {% else %}<p class="muted">No estimate yet.</p>{% endif %}
+    {% elif not v.motivation_level %}<p class="muted">No estimate yet.</p>{% endif %}
   </section>
 
   <section>

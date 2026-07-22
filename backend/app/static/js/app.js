@@ -104,12 +104,13 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       article.innerHTML = `${h2}<p class="muted">${key === "top_deal" ? "No vehicles yet — run collectors." : "None tracked"}</p>`;
       return;
     }
-    const priceLine =
-      key === "top_deal"
-        ? `${zar(vehicle.price)} · score ${vehicle.deal_score ?? "—"}`
-        : key === "most_motivated"
-          ? `${escapeHtml(vehicle.motivation_level || "—")} · ${zar(vehicle.price)}`
-          : zar(vehicle.price);
+    const scoreVisual =
+      key === "most_motivated"
+        ? motivationCellHtml(
+            { motivation_level: vehicle.motivation_level },
+            "sm"
+          )
+        : scoreCellHtml({ deal_score: vehicle.deal_score }, "sm");
     const src = vehicle.primary_source || {};
     const href = src.url || vehicle.detail_path || `/vehicles/${vehicle.id}`;
     const external = Boolean(src.url);
@@ -117,7 +118,10 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     const target = external ? ` target="_blank" rel="noopener noreferrer"` : "";
     article.innerHTML = `${h2}<a class="spot-card" href="${escapeHtml(href)}"${target}>
       <p class="spot-title">${escapeHtml(vehicle.year || "")} ${escapeHtml(vehicle.variant || "Fortuner")}</p>
-      <p class="spot-price">${priceLine}</p>
+      <div class="spot-meta">
+        <p class="spot-price">${zar(vehicle.price)}</p>
+        ${scoreVisual}
+      </div>
       <span class="spot-cta">${escapeHtml(cta)}</span>
     </a>`;
   }
@@ -348,9 +352,12 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       html += `<section><h3>New listings <span class="mono">${escapeHtml(lastFetch.new ?? newItems.length)}</span></h3><ul class="changes-list">`;
       html += newItems
         .map((item) => {
-          const scoreBit = item.deal_score != null ? `score ${escapeHtml(item.deal_score)} · ` : "";
+          const scoreBit =
+            item.deal_score != null
+              ? `${scoreCellHtml({ deal_score: item.deal_score }, "sm")}`
+              : "";
           const metaBits = [fmtKm(item.mileage), item.location].filter(Boolean).join(" · ");
-          return `<li><a href="${escapeHtml(item.href || "#")}"><strong>${escapeHtml(item.title || "Fortuner")}</strong><span class="mono">${scoreBit}${escapeHtml(item.price_label || "—")}</span>${metaBits ? `<span class="muted tiny">${escapeHtml(metaBits)}</span>` : ""}</a></li>`;
+          return `<li><a href="${escapeHtml(item.href || "#")}"><strong>${escapeHtml(item.title || "Fortuner")}</strong><span class="mono change-score-line">${scoreBit}${escapeHtml(item.price_label || "—")}</span>${metaBits ? `<span class="muted tiny">${escapeHtml(metaBits)}</span>` : ""}</a></li>`;
         })
         .join("");
       html += `</ul></section>`;
@@ -517,16 +524,17 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     return level || "—";
   }
 
-  function scoreCellHtml(v) {
+  function scoreCellHtml(v, size) {
     if (v.deal_score == null) return `<span class="score">—</span>`;
     const score = v.deal_score;
     const pct = Math.max(0, Math.min(100, Number(score) || 0));
     const tier = dealScoreTier(score);
+    const sizeClass = size ? ` is-${size}` : "";
     const tipClass = v.deal_score_breakdown ? " score-tip" : "";
     const tipAttrs = v.deal_score_breakdown
       ? ` tabindex="0" data-tip-kind="deal" data-score-tip="${escapeHtml(JSON.stringify(v.deal_score_breakdown))}"`
       : "";
-    return `<span class="deal-score is-${tier}${tipClass}"${tipAttrs} style="--pct: ${pct}" aria-label="Deal score ${escapeHtml(score)} of 100">
+    return `<span class="deal-score is-${tier}${sizeClass}${tipClass}"${tipAttrs} style="--pct: ${pct}" aria-label="Deal score ${escapeHtml(score)} of 100">
       <span class="deal-score-dial" aria-hidden="true">
         <svg viewBox="0 0 36 36">
           <circle class="deal-score-track" cx="18" cy="18" r="15" pathLength="100"></circle>
@@ -537,15 +545,16 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     </span>`;
   }
 
-  function motivationCellHtml(v) {
+  function motivationCellHtml(v, size) {
     if (!v.motivation_level) return `<span class="score">—</span>`;
     const rank = motivationRank(v.motivation_level);
     const label = motivationLabel(v.motivation_level);
+    const sizeClass = size ? ` is-${size}` : "";
     const tipClass = v.motivation_breakdown ? " score-tip motivation-tip" : "";
     const tipAttrs = v.motivation_breakdown
       ? ` tabindex="0" data-tip-kind="motivation" data-score-tip="${escapeHtml(JSON.stringify(v.motivation_breakdown))}"`
       : "";
-    return `<span class="motivation-meter is-l${rank}${tipClass}"${tipAttrs} data-level="${rank}" aria-label="Motivation ${escapeHtml(label)}">
+    return `<span class="motivation-meter is-l${rank}${sizeClass}${tipClass}"${tipAttrs} data-level="${rank}" aria-label="Motivation ${escapeHtml(label)}">
       <span class="motivation-pips" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
       <span class="motivation-lbl">${escapeHtml(label)}</span>
     </span>`;

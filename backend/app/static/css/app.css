@@ -159,11 +159,22 @@ h2 { font-size: 1.05rem; margin: 0 0 0.75rem; }
 }
 .spot-card:hover { background: rgba(126,200,163,0.08); text-decoration: none; }
 .spot-title { margin: 0 0 0.35rem; color: var(--ink); font-weight: 600; }
+.spot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+  margin: 0.15rem 0 0;
+}
 .spot-price { margin: 0; color: var(--muted); font-family: var(--mono); font-size: 0.9rem; }
 .spot-cta {
   display: inline-block; margin-top: 0.65rem; color: var(--accent-2); font-size: 0.82rem; font-weight: 500;
 }
 .spot-card:hover .spot-cta { text-decoration: underline; }
+.spot-card .deal-score,
+.spot-card .motivation-meter {
+  pointer-events: none;
+}
 .muted { color: var(--muted); }
 .tiny { font-size: 0.78rem; }
 .section-head { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin-bottom: 1rem; }
@@ -245,6 +256,18 @@ table.listings th { color: var(--muted); font-weight: 500; font-size: 0.75rem; t
   display: grid;
   place-items: center;
 }
+.deal-score.is-sm .deal-score-dial {
+  width: 1.85rem;
+  height: 1.85rem;
+}
+.deal-score.is-md .deal-score-dial {
+  width: 2.6rem;
+  height: 2.6rem;
+}
+.deal-score.is-lg .deal-score-dial {
+  width: 3.4rem;
+  height: 3.4rem;
+}
 .deal-score-dial svg {
   position: absolute;
   inset: 0;
@@ -276,6 +299,9 @@ table.listings th { color: var(--muted); font-weight: 500; font-size: 0.75rem; t
   line-height: 1;
   color: var(--ink);
 }
+.deal-score.is-sm .deal-score-num { font-size: 0.58rem; }
+.deal-score.is-md .deal-score-num { font-size: 0.74rem; }
+.deal-score.is-lg .deal-score-num { font-size: 0.95rem; }
 .deal-score.score-tip:hover .deal-score-num,
 .deal-score.score-tip:focus-visible .deal-score-num {
   color: var(--ring);
@@ -288,17 +314,35 @@ table.listings th { color: var(--muted); font-weight: 500; font-size: 0.75rem; t
   vertical-align: middle;
   min-width: 3.4rem;
 }
+.motivation-meter.is-sm {
+  min-width: 2.8rem;
+  gap: 0.15rem;
+}
+.motivation-meter.is-lg {
+  min-width: 4.2rem;
+  gap: 0.3rem;
+}
 .motivation-pips {
   display: flex;
   gap: 0.18rem;
   align-items: center;
 }
+.motivation-meter.is-sm .motivation-pips { gap: 0.14rem; }
+.motivation-meter.is-lg .motivation-pips { gap: 0.25rem; }
 .motivation-pips i {
   width: 0.55rem;
   height: 0.55rem;
   border-radius: 2px;
   background: rgba(155, 176, 163, 0.18);
   box-shadow: inset 0 0 0 1px rgba(155, 176, 163, 0.18);
+}
+.motivation-meter.is-sm .motivation-pips i {
+  width: 0.42rem;
+  height: 0.42rem;
+}
+.motivation-meter.is-lg .motivation-pips i {
+  width: 0.72rem;
+  height: 0.72rem;
 }
 .motivation-meter.is-l1 .motivation-pips i:nth-child(-n+1),
 .motivation-meter.is-l2 .motivation-pips i:nth-child(-n+2),
@@ -318,9 +362,46 @@ table.listings th { color: var(--muted); font-weight: 500; font-size: 0.75rem; t
   text-transform: lowercase;
   letter-spacing: 0.02em;
 }
+.motivation-meter.is-sm .motivation-lbl { font-size: 0.62rem; }
+.motivation-meter.is-lg .motivation-lbl { font-size: 0.82rem; }
 .motivation-meter.score-tip:hover .motivation-lbl,
 .motivation-meter.score-tip:focus-visible .motivation-lbl {
   color: var(--ink);
+}
+
+.chip-row.score-chips {
+  align-items: center;
+}
+.chip-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.chip-score .chip-caption {
+  display: grid;
+  gap: 0.1rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.2;
+}
+.chip-score .chip-caption i {
+  font-style: normal;
+  opacity: 0.7;
+  font-size: 0.7rem;
+}
+.score-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin: 0 0 0.85rem;
+}
+.score-panel-head .muted { margin: 0; max-width: 16rem; }
+.change-score-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
 }
 
 .score-tip-float {

@@ -1,6 +1,7 @@
 {% extends "partials/base.html" %}
 {% block title %}Dashboard · Fortuner Agent{% endblock %}
 {% block content %}
+{% from "partials/score_widgets.html" import deal_score_widget, motivation_widget %}
 <section class="hero-panel">
   <div>
     <p class="eyebrow">South African used market</p>
@@ -72,7 +73,12 @@
               <li>
                 <a href="{{ item.href }}">
                   <strong>{{ item.title }}</strong>
-                  <span class="mono">{% if item.deal_score is not none %}score {{ item.deal_score }} · {% endif %}{{ item.price_label or '—' }}</span>
+                  <span class="mono change-score-line">
+                    {% if item.deal_score is not none %}
+                    {{ deal_score_widget(item.deal_score, none, 'sm') }}
+                    {% endif %}
+                    {{ item.price_label or '—' }}
+                  </span>
                   {% if item.location or item.mileage %}
                   <span class="muted tiny">{% if item.mileage %}{{ '{:,}'.format(item.mileage).replace(',', ' ') }} km{% endif %}{% if item.mileage and item.location %} · {% endif %}{{ item.location or '' }}</span>
                   {% endif %}
@@ -182,7 +188,10 @@
       {% set src = stats.top_deal.primary_source %}
       <a class="spot-card" href="{{ src.url if src and src.url else (stats.top_deal.detail_path or ('/vehicles/' ~ stats.top_deal.id)) }}"{% if src and src.url %} target="_blank" rel="noopener noreferrer"{% endif %}>
         <p class="spot-title">{{ stats.top_deal.year }} {{ stats.top_deal.variant }}</p>
-        <p class="spot-price">{{ stats.top_deal.price | zar }} · score {{ stats.top_deal.deal_score }}</p>
+        <div class="spot-meta">
+          <p class="spot-price">{{ stats.top_deal.price | zar }}</p>
+          {{ deal_score_widget(stats.top_deal.deal_score, none, 'sm') }}
+        </div>
         <span class="spot-cta">Open on {{ src.label if src and src.label else 'listing' }} →</span>
       </a>
     {% else %}<p class="muted">No vehicles yet — run collectors.</p>{% endif %}
@@ -193,7 +202,10 @@
       {% set src = stats.best_grs.primary_source %}
       <a class="spot-card" href="{{ src.url if src and src.url else (stats.best_grs.detail_path or ('/vehicles/' ~ stats.best_grs.id)) }}"{% if src and src.url %} target="_blank" rel="noopener noreferrer"{% endif %}>
         <p class="spot-title">{{ stats.best_grs.year }} {{ stats.best_grs.variant }}</p>
-        <p class="spot-price">{{ stats.best_grs.price | zar }}</p>
+        <div class="spot-meta">
+          <p class="spot-price">{{ stats.best_grs.price | zar }}</p>
+          {{ deal_score_widget(stats.best_grs.deal_score, none, 'sm') }}
+        </div>
         <span class="spot-cta">Open on {{ src.label if src and src.label else 'listing' }} →</span>
       </a>
     {% else %}<p class="muted">None tracked</p>{% endif %}
@@ -204,7 +216,10 @@
       {% set src = stats.best_vx.primary_source %}
       <a class="spot-card" href="{{ src.url if src and src.url else (stats.best_vx.detail_path or ('/vehicles/' ~ stats.best_vx.id)) }}"{% if src and src.url %} target="_blank" rel="noopener noreferrer"{% endif %}>
         <p class="spot-title">{{ stats.best_vx.year }} {{ stats.best_vx.variant }}</p>
-        <p class="spot-price">{{ stats.best_vx.price | zar }}</p>
+        <div class="spot-meta">
+          <p class="spot-price">{{ stats.best_vx.price | zar }}</p>
+          {{ deal_score_widget(stats.best_vx.deal_score, none, 'sm') }}
+        </div>
         <span class="spot-cta">Open on {{ src.label if src and src.label else 'listing' }} →</span>
       </a>
     {% else %}<p class="muted">None tracked</p>{% endif %}
@@ -215,7 +230,10 @@
       {% set src = stats.most_motivated.primary_source %}
       <a class="spot-card" href="{{ src.url if src and src.url else (stats.most_motivated.detail_path or ('/vehicles/' ~ stats.most_motivated.id)) }}"{% if src and src.url %} target="_blank" rel="noopener noreferrer"{% endif %}>
         <p class="spot-title">{{ stats.most_motivated.year }} {{ stats.most_motivated.variant }}</p>
-        <p class="spot-price">{{ stats.most_motivated.motivation_level }} · {{ stats.most_motivated.price | zar }}</p>
+        <div class="spot-meta">
+          <p class="spot-price">{{ stats.most_motivated.price | zar }}</p>
+          {{ motivation_widget(stats.most_motivated.motivation_level, none, 'sm') }}
+        </div>
         <span class="spot-cta">Open on {{ src.label if src and src.label else 'listing' }} →</span>
       </a>
     {% else %}<p class="muted">None tracked</p>{% endif %}

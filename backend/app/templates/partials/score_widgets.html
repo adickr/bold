@@ -1,4 +1,4 @@
-{# Visual score widgets for listing tables. #}
+{# Visual score widgets used across tables, spotlights, and detail pages. #}
 
 {% macro deal_tier(score) -%}
 {%- if score is none -%}
@@ -29,13 +29,13 @@
 {%- endif -%}
 {%- endmacro %}
 
-{% macro deal_score_widget(score, breakdown=None) -%}
+{% macro deal_score_widget(score, breakdown=None, size='') -%}
 {%- if score is none -%}
 <span class="score">—</span>
 {%- else -%}
 {%- set pct = score if score < 100 else 100 -%}
 {%- set tier = deal_tier(score) -%}
-<span class="deal-score is-{{ tier }}{% if breakdown %} score-tip{% endif %}"
+<span class="deal-score is-{{ tier }}{% if size %} is-{{ size }}{% endif %}{% if breakdown %} score-tip{% endif %}"
       style="--pct: {{ pct }}"
       {% if breakdown %}tabindex="0" data-tip-kind="deal" data-score-tip="{{ breakdown | tojson | forceescape }}"{% endif %}
       aria-label="Deal score {{ score }} of 100">
@@ -50,12 +50,12 @@
 {%- endif -%}
 {%- endmacro %}
 
-{% macro motivation_widget(level, breakdown=None) -%}
+{% macro motivation_widget(level, breakdown=None, size='') -%}
 {%- if not level -%}
 <span class="score">—</span>
 {%- else -%}
 {%- set rank = motivation_rank(level) -%}
-<span class="motivation-meter is-l{{ rank }}{% if breakdown %} score-tip motivation-tip{% endif %}"
+<span class="motivation-meter is-l{{ rank }}{% if size %} is-{{ size }}{% endif %}{% if breakdown %} score-tip motivation-tip{% endif %}"
       data-level="{{ rank }}"
       {% if breakdown %}tabindex="0" data-tip-kind="motivation" data-score-tip="{{ breakdown | tojson | forceescape }}"{% endif %}
       aria-label="Motivation {{ motivation_label(level) }}">
