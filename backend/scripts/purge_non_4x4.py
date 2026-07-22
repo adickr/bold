@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Deactivate / remove listings that fail the explicit-4x4 gate.
 
-Especially AutoTrader SEO URLs without ``4x4`` in the path
-(e.g. /car-for-sale/toyota/fortuner/2.8gd-6/28658500).
+AutoTrader: drop when neither URL nor title/variant says 4x4
+(e.g. /2.8gd-6/28658500 with title "2.8GD-6 VX").
+Cars.co.za: drop when URL/title lacks explicit 4x4.
 """
 
 from __future__ import annotations
@@ -29,12 +30,17 @@ from app.models.entities import (
     SourceListing,
 )
 from app.services.ingestion import IngestionService
+from app.services.normalise import detect_drivetrain
 
 
 def _autotrader_lacks_4x4(row: SourceListing) -> bool:
     if row.source != "autotrader":
         return False
-    return AutoTraderCollector.drivetrain_from_url(row.url) != "4x4"
+    url_dt = AutoTraderCollector.drivetrain_from_url(row.url)
+    text_dt = detect_drivetrain(" ".join(filter(None, [row.variant_raw, row.title])))
+    if url_dt == "4x2" or text_dt == "4x2":
+        return True
+    return url_dt != "4x4" and text_dt != "4x4"
 
 
 def _cars_lacks_4x4(row: SourceListing) -> bool:
@@ -72,7 +78,6 @@ def main() -> None:
             db.execute(delete(PriceEvent).where(PriceEvent.source_listing_id.in_(bad_ids)))
             db.execute(delete(SourceListing).where(SourceListing.id.in_(bad_ids)))
 
-        # Also run criteria purge for anything else stale
         service = IngestionService(db)
         deactivated = service._purge_listings_failing_criteria()
 

@@ -54,7 +54,6 @@ def evaluate_listing(
 
     drivetrain = variant.drivetrain or listing.drivetrain
     path = (urlparse(listing.url or "").path or "").lower()
-    host = (urlparse(listing.url or "").netloc or "").lower()
     title_blob = " ".join(
         filter(None, [listing.title, listing.variant_raw, listing.description, path])
     )
@@ -63,14 +62,6 @@ def evaluate_listing(
         drivetrain = "4x2"
     elif re.search(r"(?:^|[-_/])4x2(?:[-_/]|$)", path):
         drivetrain = "4x2"
-    elif "autotrader.co.za" in host:
-        # AT: only trust 4x4 when the SEO slug says so (chip text lies)
-        if re.search(r"(?:^|[-_/])4x4(?:[-_/]|$)", path) or re.search(
-            r"(?:^|[-_/])4-x-4(?:[-_/]|$)", path
-        ):
-            drivetrain = "4x4"
-        else:
-            drivetrain = None
     elif re.search(r"(?:^|[-_/])4x4(?:[-_/]|$)", path) and drivetrain != "4x2":
         drivetrain = drivetrain or "4x4"
 

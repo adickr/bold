@@ -91,42 +91,46 @@ def test_autotrader_wc_annotate_fills_empty_location():
     assert rows[0].drivetrain == "4x4"
 
 
-def test_autotrader_requires_4x4_in_url_slug():
-    """Title saying 4x4 is not enough — SEO path must contain 4x4."""
+def test_autotrader_keeps_4x4_from_variant_when_slug_omits():
+    """Live AT often uses /2.8gd-6/{id} even for real 4x4s — variant still says 4x4."""
     c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
-    # Polluted title, no 4x4 in URL → drop (this is how 28658500 topped the board)
-    dropped = c._annotate_search_scope(
+    rows = c._annotate_search_scope(
+        [
+            ListingPayload(
+                source="autotrader",
+                source_listing_id="28406720",
+                url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28406720",
+                title="Toyota Fortuner 2.8GD-6 4x4 VX",
+                variant_raw="2.8GD-6 4x4 VX",
+                make="Toyota",
+                model="Fortuner",
+            )
+        ]
+    )
+    assert len(rows) == 1
+    assert rows[0].drivetrain == "4x4"
+
+
+def test_autotrader_drops_when_url_and_title_lack_4x4():
+    """Knysna 28658500: /2.8gd-6/ + 'VX' with no 4x4 must not be assumed 4x4."""
+    c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
+    rows = c._annotate_search_scope(
         [
             ListingPayload(
                 source="autotrader",
                 source_listing_id="28658500",
                 url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28658500",
-                title="2024 Toyota Fortuner 2.8GD-6 4x4 VX",  # chip / stale pollution
-                variant_raw="2.8GD-6 4x4 VX",
+                title="2024 Toyota Fortuner 2.8GD-6 VX",
+                variant_raw="2.8GD-6 VX",
                 price_zar=669900,
                 mileage_km=18000,
                 make="Toyota",
                 model="Fortuner",
-                drivetrain="4x4",
+                drivetrain="4x4",  # stale tag must not save it
             )
         ]
     )
-    assert dropped == []
-
-    kept = c._annotate_search_scope(
-        [
-            ListingPayload(
-                source="autotrader",
-                source_listing_id="28096596",
-                url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6-4x4-vx/28096596",
-                title="2022 Toyota Fortuner 2.8GD-6 4x4 VX",
-                make="Toyota",
-                model="Fortuner",
-            )
-        ]
-    )
-    assert len(kept) == 1
-    assert kept[0].drivetrain == "4x4"
+    assert rows == []
 
 
 def test_autotrader_parses_embedded_search_json():
@@ -134,7 +138,7 @@ def test_autotrader_parses_embedded_search_json():
     <html><body><script>
     {"results":{"pageNumber":1,"pageCount":3,"featuredTiles":[
       {"resultType":1,"listingId":28593847,
-       "canonicalUrl":"/car-for-sale/toyota/fortuner/2.8gd-6-4x4-vx/28593847",
+       "canonicalUrl":"/car-for-sale/toyota/fortuner/2.8gd-6/28593847",
        "imageUrl":"https://img.autotrader.co.za/46184292",
        "make":"Toyota","model":"Fortuner","variant":"2.8GD-6 4x4 VX",
        "makeModelLongVariant":"Toyota Fortuner 2.8GD-6 4x4 VX",
