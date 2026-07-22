@@ -75,8 +75,9 @@ export PLAYWRIGHT_USER_DATA_DIR=./data/chrome-profile-cars
 # Fresh profile if the old one is poisoned:
 #   rm -rf ./data/chrome-profile ./data/chrome-profile-cars
 
-# Delete AutoTrader rows with invented/broken URLs (they 503 in-browser), then start the app
+# Delete AutoTrader rows with invented/broken URLs or filter-chip noise, then start the app
 python scripts/fix_bad_autotrader_urls.py
+python scripts/purge_autotrader_noise.py
 lsof -ti:8000 | xargs kill -9 2>/dev/null
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
