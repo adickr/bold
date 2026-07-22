@@ -410,8 +410,6 @@ tr.is-new-listing {
   cursor: pointer;
 }
 .btn-ghost:hover { border-color: var(--accent-2); color: var(--accent-2); filter: none; }
-.btn-ghost[data-quiet] { color: var(--muted); font-weight: 500; }
-[data-what-changed-btn][hidden] { display: none; }
 
 .changes-dialog {
   width: min(560px, calc(100vw - 2rem));
