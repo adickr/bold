@@ -213,14 +213,14 @@ def test_ingestion_dedup_and_price_history(db_session):
     # Simulate price reduction observation
     listing = (
         db_session.execute(
-            select(SourceListing).where(SourceListing.source_listing_id == "AT1001")
+            select(SourceListing).where(SourceListing.source_listing_id == "28001001")
         )
         .scalar_one()
     )
     old = listing.price_zar
     reduced = ListingPayload(
         source="autotrader",
-        source_listing_id="AT1001",
+        source_listing_id="28001001",
         url=listing.url,
         title=listing.title,
         description=listing.description,

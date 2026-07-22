@@ -72,24 +72,22 @@ export ENABLE_SCHEDULER=false
 export PLAYWRIGHT_HEADED=true
 export PLAYWRIGHT_USER_DATA_DIR=./data/chrome-profile
 
-# App UI (Collect button uses the same env)
+# Repair old broken AutoTrader short URLs, then start the app
+python scripts/fix_bad_autotrader_urls.py
 lsof -ti:8000 | xargs kill -9 2>/dev/null
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
+Open http://127.0.0.1:8000 (`buyer` / `fortuner`) → **Collect live listings now**.
+
 First Cars.co.za collect may open a Chrome window — complete the Cloudflare
-checkbox if shown, then leave it. AutoTrader / WeBuyCars do not need this.
-
-Or one-shot CLI:
-
-```bash
-python scripts/collect_live.py
-```
+checkbox if shown. AutoTrader / WeBuyCars do not need this.
 
 Notes:
 - Keep volume low; this is a private tool
 - Listings outside 4x4 / ~110k km are filtered out (price is not a hard reject)
 - Asking prices only — not sold prices
+- Marketplace buttons only show when the URL is a real detail page (short `/car-for-sale/{id}` links are repaired or hidden)
 - If Cars.co.za still fails, AutoTrader + WeBuyCars still feed the dashboard
 
 

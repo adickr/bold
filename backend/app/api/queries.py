@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.config import get_settings
 from app.models.entities import CanonicalVehicle, PriceEvent
 from app.schemas.listings import DashboardStats, VehicleFilterParams
-from app.services.media import absolute_url, source_label
+from app.services.media import absolute_url, is_valid_marketplace_url, normalise_listing_url, source_label
 
 # Towns/areas commonly listed without "Western Cape" in the location string.
 _WESTERN_CAPE_HINTS = (
@@ -190,22 +190,33 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
     shortlist = v.shortlist_entry
     sources = []
     for s in getattr(v, "source_listings", []) or []:
+        url = normalise_listing_url(
+            s.source,
+            s.url,
+            listing_id=s.source_listing_id,
+            title=s.title,
+            variant=s.variant_raw or s.variant_normalised,
+            year=s.year,
+        )
+        if not url or not is_valid_marketplace_url(s.source, url):
+            # Still show agent-side status but no broken outbound button
+            url = None
         sources.append(
             {
                 "id": s.id,
                 "source": s.source,
                 "label": source_label(s.source),
-                "url": absolute_url(s.url, source=s.source) or s.url,
+                "url": url,
                 "price": s.price_zar,
                 "status": s.listing_status,
                 "title": s.title,
             }
         )
-    # Prefer cheapest *active* source as primary outbound link
+    # Prefer cheapest *active* source with a working URL as primary outbound link
     active_sources = [
         s
         for s in sources
-        if s.get("status") in {"active", "relisted"}
+        if s.get("status") in {"active", "relisted"} and s.get("url")
     ]
     primary_source = None
     if active_sources:
@@ -215,7 +226,8 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
         )[0]
     elif sources:
         # Fall back only for detail context; UI should still mark removed
-        primary_source = sources[0]
+        with_url = [s for s in sources if s.get("url")]
+        primary_source = with_url[0] if with_url else sources[0]
 
     image_candidates: list[str] = []
     if v.primary_image_url:

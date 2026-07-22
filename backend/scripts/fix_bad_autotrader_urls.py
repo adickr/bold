@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Delete AutoTrader rows with invalid short URLs, then optionally re-collect."""
+"""Repair or delete AutoTrader rows with invalid short URLs."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ sys.path.insert(0, str(ROOT))
 
 from sqlalchemy import delete, or_, select
 
-from app.collectors.autotrader import AutoTraderCollector
 from app.db.session import SessionLocal, init_db
 from app.models.entities import (
     AlertLog,
@@ -22,12 +21,7 @@ from app.models.entities import (
     ShortlistEntry,
     SourceListing,
 )
-
-
-def _bad_autotrader_url(url: str | None) -> bool:
-    if not url:
-        return True
-    return not AutoTraderCollector.is_detail_url(url)
+from app.services.media import is_valid_marketplace_url, normalise_listing_url
 
 
 def main() -> None:
@@ -39,8 +33,25 @@ def main() -> None:
             .scalars()
             .all()
         )
-        bad_ids = [r.id for r in rows if _bad_autotrader_url(r.url)]
-        print(f"Found {len(bad_ids)} AutoTrader listings with invalid URLs")
+        repaired = 0
+        bad_ids: list[int] = []
+        for row in rows:
+            fixed = normalise_listing_url(
+                row.source,
+                row.url,
+                listing_id=row.source_listing_id,
+                title=row.title,
+                variant=row.variant_raw or row.variant_normalised,
+                year=row.year,
+            )
+            if fixed and is_valid_marketplace_url("autotrader", fixed):
+                if fixed != row.url:
+                    row.url = fixed
+                    repaired += 1
+                continue
+            bad_ids.append(row.id)
+
+        print(f"Repaired {repaired} AutoTrader URLs; deleting {len(bad_ids)} unrepairable")
         if bad_ids:
             db.execute(
                 delete(ListingObservation).where(
@@ -58,7 +69,6 @@ def main() -> None:
             db.execute(delete(PriceEvent).where(PriceEvent.source_listing_id.in_(bad_ids)))
             db.execute(delete(SourceListing).where(SourceListing.id.in_(bad_ids)))
 
-        # Remove orphan canonicals
         vehicles = db.execute(select(CanonicalVehicle)).scalars().all()
         removed = 0
         for vehicle in vehicles:
@@ -79,7 +89,7 @@ def main() -> None:
             db.delete(vehicle)
             removed += 1
         db.commit()
-        print(f"Deleted bad listings; removed {removed} orphan vehicles")
+        print(f"Removed {removed} orphan vehicles")
     finally:
         db.close()
 

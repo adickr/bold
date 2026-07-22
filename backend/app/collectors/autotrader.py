@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Real detail URLs look like:
 # /car-for-sale/toyota/fortuner/2.8gd-6-4x4-vx/28096596
 DETAIL_PATH_RE = re.compile(
-    r"^/car-for-sale/(?:[^/]+/){1,6}(?P<id>\d{6,})/?$",
+    r"^/car-for-sale/(?:[^/]+/){1,12}(?P<id>\d{6,})/?$",
     re.I,
 )
 
@@ -460,14 +460,44 @@ class AutoTraderCollector(BaseCollector):
 
     @staticmethod
     def _extract_mileage(text: str) -> int | None:
-        m = re.search(r"([\d\s]+)\s*km", text, re.I)
-        if not m:
+        """Prefer card odometer; ignore filter chips like 'Up to 100 000 km'."""
+        cleaned = re.sub(
+            r"(?i)(up\s*to|mileage\s*to|max(?:imum)?|under|below|less\s*than)\s*[\d\s,]+\s*km",
+            " ",
+            text or "",
+        )
+        candidates: list[int] = []
+        for m in re.finditer(
+            r"(?<!\d)(\d{1,3}(?:[ \t]\d{3}){0,2}|\d{4,6})[ \t]*km\b",
+            cleaned,
+            re.I,
+        ):
+            digits = re.sub(r"[^\d]", "", m.group(1))
+            if not digits:
+                continue
+            val = int(digits)
+            if 1_000 <= val <= 500_000:
+                candidates.append(val)
+        if not candidates:
             return None
-        return int(re.sub(r"\s+", "", m.group(1)))
+        # Card odometer is usually the last plausible km on the card
+        return candidates[-1]
 
     @staticmethod
     def _extract_price(text: str) -> int | None:
-        m = re.search(r"R\s*([\d\s,]+)", text, re.I)
-        if not m:
-            return None
-        return int(re.sub(r"[^\d]", "", m.group(1)))
+        # Do not use re.I — trailing 'r' in "Fortuner" must not match as currency.
+        # Prefer grouped amounts like "R 539 900" and stop before mileage digits.
+        for m in re.finditer(
+            r"(?<![A-Za-z])R[ \t]*(\d{1,3}(?:[ \t]\d{3}){1,3}|\d{5,7})\b",
+            text or "",
+        ):
+            tail = (text or "")[m.end() : m.end() + 8].lower()
+            if "p/m" in tail or "/month" in tail:
+                continue
+            digits = re.sub(r"[^\d]", "", m.group(1))
+            if not digits:
+                continue
+            val = int(digits)
+            if 50_000 <= val <= 5_000_000:
+                return val
+        return None

@@ -15,6 +15,18 @@ def test_autotrader_detail_url_validation():
     assert AutoTraderCollector.is_detail_url(search) is False
 
 
+def test_autotrader_mileage_ignores_filter_chip():
+    text = "Up to 100 000 km\n2022 Toyota Fortuner 2.8GD-6 4x4\nR 699 900\n45 200 km\nBrackenfell"
+    assert AutoTraderCollector._extract_mileage(text) == 45200
+    assert AutoTraderCollector._extract_price(text) == 699900
+
+
+def test_autotrader_price_ignores_fortuner_trailing_r():
+    text = "2023 Toyota Fortuner 2.4 GD-6 4x4 AT R 539 900 90 560 km"
+    assert AutoTraderCollector._extract_price(text) == 539900
+    assert AutoTraderCollector._extract_mileage(text) == 90560
+
+
 def test_autotrader_wc_annotate_fills_empty_location():
     c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
     rows = c._annotate_search_scope(

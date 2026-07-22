@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from urllib.parse import urljoin, urlparse
 
 
@@ -16,6 +17,15 @@ SOURCE_ORIGINS = {
     "cars_co_za": "https://www.cars.co.za",
     "webuycars": "https://www.webuycars.co.za",
 }
+
+_AT_DETAIL_RE = re.compile(
+    r"^/car-for-sale/(?:[^/]+/){1,12}(?P<id>\d{6,})/?$",
+    re.I,
+)
+_CARS_USED_RE = re.compile(
+    r"/for-sale/used/[^\"'\s>]*/(?P<id>\d{5,})/?",
+    re.I,
+)
 
 
 def source_label(source: str | None) -> str:
@@ -41,6 +51,99 @@ def absolute_url(url: str | None, *, source: str | None = None) -> str | None:
     if origin and not urlparse(value).scheme:
         return urljoin(origin + "/", value.lstrip("/"))
     return value
+
+
+def _slugify(text: str | None) -> str:
+    raw = (text or "").lower()
+    raw = re.sub(r"toyota|fortuner", " ", raw)
+    raw = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    return raw[:80] or "4x4"
+
+
+def rebuild_autotrader_url(
+    listing_id: str | None,
+    *,
+    title: str | None = None,
+    variant: str | None = None,
+) -> str | None:
+    """Build a SEO-shaped AutoTrader detail URL from listing id + title/variant."""
+    if not listing_id or not str(listing_id).isdigit() or len(str(listing_id)) < 6:
+        return None
+    slug = _slugify(variant or title)
+    return (
+        f"https://www.autotrader.co.za/car-for-sale/toyota/fortuner/{slug}/{listing_id}"
+    )
+
+
+def rebuild_webuycars_url(listing_id: str | None) -> str | None:
+    if not listing_id:
+        return None
+    stock = str(listing_id).strip()
+    if not stock:
+        return None
+    return f"https://www.webuycars.co.za/buy-a-car/{stock}"
+
+
+def rebuild_cars_co_za_url(
+    listing_id: str | None,
+    *,
+    title: str | None = None,
+    year: int | None = None,
+) -> str | None:
+    if not listing_id or not str(listing_id).isdigit():
+        return None
+    slug = _slugify(title) or "toyota-fortuner"
+    if year and not str(year) in slug:
+        slug = f"{year}-toyota-fortuner-{slug}"
+    elif "toyota" not in slug:
+        slug = f"toyota-fortuner-{slug}"
+    return f"https://www.cars.co.za/for-sale/used/{slug}/{listing_id}/"
+
+
+def is_valid_marketplace_url(source: str | None, url: str | None) -> bool:
+    if not source or not url:
+        return False
+    abs_url = absolute_url(url, source=source)
+    if not abs_url:
+        return False
+    path = urlparse(abs_url).path
+    if source == "autotrader":
+        return bool(_AT_DETAIL_RE.match(path))
+    if source == "cars_co_za":
+        return bool(_CARS_USED_RE.search(path))
+    if source == "webuycars":
+        lower = path.lower()
+        return "/buy-a-car/" in lower and not lower.rstrip("/").endswith("/buy-a-car")
+    return abs_url.startswith("http")
+
+
+def normalise_listing_url(
+    source: str | None,
+    url: str | None,
+    *,
+    listing_id: str | None = None,
+    title: str | None = None,
+    variant: str | None = None,
+    year: int | None = None,
+) -> str | None:
+    """Absolutize and repair common broken marketplace URL shapes."""
+    abs_url = absolute_url(url, source=source)
+    if source == "autotrader":
+        if abs_url and is_valid_marketplace_url("autotrader", abs_url):
+            return abs_url.split("?")[0]
+        rebuilt = rebuild_autotrader_url(listing_id, title=title, variant=variant)
+        if rebuilt:
+            return rebuilt
+        return None
+    if source == "cars_co_za":
+        if abs_url and is_valid_marketplace_url("cars_co_za", abs_url):
+            return abs_url.split("?")[0]
+        return rebuild_cars_co_za_url(listing_id, title=title, year=year)
+    if source == "webuycars":
+        if abs_url and is_valid_marketplace_url("webuycars", abs_url):
+            return abs_url.split("?")[0]
+        return rebuild_webuycars_url(listing_id)
+    return abs_url
 
 
 def normalise_image_urls(urls: list[str] | None, *, source: str | None = None) -> list[str]:

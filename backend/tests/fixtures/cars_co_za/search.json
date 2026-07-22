@@ -1,8 +1,8 @@
 [
   {
     "source": "cars_co_za",
-    "source_listing_id": "CC2001",
-    "url": "https://www.cars.co.za/for-sale/CC2001",
+    "source_listing_id": "2000001",
+    "url": "https://www.cars.co.za/for-sale/used/2022-Toyota-Fortuner-2.8-4x4/2000001/",
     "title": "2022 Toyota Fortuner 2.8 GD-6 VX 4x4 AT",
     "description": "Same VX advertised elsewhere. Full Toyota service history.",
     "dealer_name": "Sandton Toyota",
@@ -17,15 +17,18 @@
     "mileage_km": 45200,
     "colour": "White",
     "vin": "AHTZZ8CDX01234567",
-    "image_urls": ["https://images.example.com/fortuner-vx-white-1.jpg", "https://images.example.com/fortuner-vx-white-2.jpg"],
+    "image_urls": [
+      "https://images.example.com/fortuner-vx-white-1.jpg",
+      "https://images.example.com/fortuner-vx-white-2.jpg"
+    ],
     "transmission": "automatic",
     "fuel_type": "diesel",
     "drivetrain": "4x4"
   },
   {
     "source": "cars_co_za",
-    "source_listing_id": "CC2002",
-    "url": "https://www.cars.co.za/for-sale/CC2002",
+    "source_listing_id": "2000002",
+    "url": "https://www.cars.co.za/for-sale/used/2019-Toyota-Fortuner-2.8-4x4/2000002/",
     "title": "2019 Toyota Fortuner 2.8GD6 4WD VX",
     "description": "Price reduced. Clearance.",
     "dealer_name": "Pretoria Auto",
@@ -37,13 +40,15 @@
     "price_zar": 599900,
     "mileage_km": 98000,
     "colour": "Graphite Grey",
-    "image_urls": ["https://images.example.com/vx-grey-1.jpg"],
+    "image_urls": [
+      "https://images.example.com/vx-grey-1.jpg"
+    ],
     "drivetrain": "4x4"
   },
   {
     "source": "cars_co_za",
-    "source_listing_id": "CC2003",
-    "url": "https://www.cars.co.za/for-sale/CC2003",
+    "source_listing_id": "2000003",
+    "url": "https://www.cars.co.za/for-sale/used/2021-Toyota-Fortuner-2.8-4x4/2000003/",
     "title": "2021 Toyota Fortuner GRS 2.8 Diesel 4x4",
     "description": "Unusual colour Emotional Red. Low mileage for age.",
     "dealer_name": "Independent 4x4",
@@ -55,7 +60,9 @@
     "price_zar": 679900,
     "mileage_km": 41000,
     "colour": "Emotional Red",
-    "image_urls": ["https://images.example.com/grs-red-1.jpg"],
+    "image_urls": [
+      "https://images.example.com/grs-red-1.jpg"
+    ],
     "drivetrain": "4x4"
   }
 ]

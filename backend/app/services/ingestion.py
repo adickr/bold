@@ -24,7 +24,7 @@ from app.schemas.listings import ListingPayload
 from app.services.criteria import evaluate_listing
 from app.services.dedup import score_pair, should_auto_merge, strong_identity_match
 from app.services.market import compute_comparable_stats, refresh_market_fields
-from app.services.media import absolute_url, normalise_image_urls
+from app.services.media import absolute_url, normalise_image_urls, normalise_listing_url
 from app.services.scoring import compute_deal_score, compute_motivation_score
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,24 @@ class IngestionService:
                 result = evaluate_listing(payload, self.settings)
                 if not result.accepted or not result.variant:
                     continue
+                # Repair / reject broken marketplace URLs before persist
+                fixed_url = normalise_listing_url(
+                    payload.source,
+                    payload.url,
+                    listing_id=payload.source_listing_id,
+                    title=payload.title,
+                    variant=payload.variant_raw,
+                    year=payload.year,
+                )
+                if not fixed_url:
+                    logger.warning(
+                        "Skipping %s/%s — no valid marketplace URL (%s)",
+                        payload.source,
+                        payload.source_listing_id,
+                        payload.url,
+                    )
+                    continue
+                payload.url = fixed_url
                 seen_ids.add(payload.source_listing_id)
                 listing, created, changed = self._upsert_listing(payload, result)
                 if created:
@@ -90,7 +108,9 @@ class IngestionService:
 
             # Fix prior over-merges (same marketplace, different ads glued together)
             self._repair_same_source_merges()
+            self._scrub_bogus_price_events()
             self._scrub_all_price_aggregates()
+            self._repair_listing_urls()
 
             self._rescore_active()
             run.success = True
@@ -173,7 +193,18 @@ class IngestionService:
                 listing.listing_status = ListingStatus.RELISTED.value
 
         # Apply fields
-        listing.url = absolute_url(payload.url, source=payload.source) or payload.url
+        listing.url = (
+            normalise_listing_url(
+                payload.source,
+                payload.url,
+                listing_id=payload.source_listing_id,
+                title=payload.title,
+                variant=payload.variant_raw,
+                year=payload.year,
+            )
+            or absolute_url(payload.url, source=payload.source)
+            or payload.url
+        )
         listing.title = payload.title
         listing.description = payload.description
         listing.dealer_name = payload.dealer_name
@@ -466,6 +497,49 @@ class IngestionService:
         for vehicle in vehicles:
             linked = list(vehicle.source_listings or [])
             self._recompute_price_aggregates(vehicle, linked)
+
+    def _scrub_bogus_price_events(self) -> int:
+        """Drop price-change events that came from parser garbage (e.g. price=2)."""
+        events = list(self.db.execute(select(PriceEvent)).scalars().all())
+        removed = 0
+        for event in events:
+            prices = [p for p in (event.old_price_zar, event.new_price_zar) if p is not None]
+            if any(not (50_000 <= p <= 5_000_000) for p in prices):
+                self.db.delete(event)
+                removed += 1
+        if removed:
+            logger.info("Removed %s bogus price events", removed)
+            self.db.flush()
+        return removed
+
+    def _repair_listing_urls(self) -> int:
+        """Rebuild short/invalid marketplace URLs already in the DB."""
+        listings = list(self.db.execute(select(SourceListing)).scalars().all())
+        fixed = 0
+        for listing in listings:
+            repaired = normalise_listing_url(
+                listing.source,
+                listing.url,
+                listing_id=listing.source_listing_id,
+                title=listing.title,
+                variant=listing.variant_raw or listing.variant_normalised,
+                year=listing.year,
+            )
+            if repaired and repaired != listing.url:
+                listing.url = repaired
+                fixed += 1
+            elif not repaired:
+                # Hide broken outbound links from the UI
+                if listing.listing_status in {
+                    ListingStatus.ACTIVE.value,
+                    ListingStatus.RELISTED.value,
+                }:
+                    listing.listing_status = ListingStatus.POSSIBLY_REMOVED.value
+                    fixed += 1
+        if fixed:
+            logger.info("Repaired/hid %s listing URL(s)", fixed)
+            self.db.flush()
+        return fixed
 
     def _reattach_price_events(self, listing_ids: list[int], canonical_id: int) -> None:
         if not listing_ids:

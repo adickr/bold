@@ -17,7 +17,7 @@
       {% if summary.total_reduction %}<span>−{{ summary.total_reduction | zar }} total</span>{% endif %}
     </div>
     <div class="actions" style="margin-top:1rem">
-      {% set active_sources = summary.sources | selectattr('status', 'in', ['active', 'relisted']) | list %}
+      {% set active_sources = summary.sources | selectattr('status', 'in', ['active', 'relisted']) | selectattr('url') | list %}
       {% if active_sources %}
         {% set primary = active_sources|sort(attribute='price')|first %}
         <a class="button-link" href="{{ primary.url }}" target="_blank" rel="noopener noreferrer">
@@ -29,7 +29,7 @@
           {% endif %}
         {% endfor %}
       {% else %}
-        <p class="risk">No active source listings remain for this vehicle.</p>
+        <p class="risk">No working marketplace link for this vehicle yet — re-collect live listings.</p>
       {% endif %}
     </div>
   </div>
@@ -39,23 +39,22 @@
   <section>
     <h2>Where it’s listed</h2>
     <ul class="source-list">
-      {% for s in v.source_listings %}
-      <li class="{% if s.listing_status not in ['active', 'relisted'] %}muted{% endif %}">
+      {% for s in summary.sources %}
+      <li class="{% if s.status not in ['active', 'relisted'] %}muted{% endif %}">
         <div class="source-row">
-          {% if s.listing_status in ['active', 'relisted'] %}
+          {% if s.url and s.status in ['active', 'relisted'] %}
             <a class="button-link" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">
-              View on {{ {'autotrader':'AutoTrader','cars_co_za':'Cars.co.za','webuycars':'WeBuyCars'}.get(s.source, s.source) }}
+              View on {{ s.label }}
             </a>
           {% else %}
-            <span class="button-link secondary">{{ {'autotrader':'AutoTrader','cars_co_za':'Cars.co.za','webuycars':'WeBuyCars'}.get(s.source, s.source) }} ({{ s.listing_status.replace('_',' ') }})</span>
+            <span class="button-link secondary">{{ s.label }}{% if s.status %} ({{ s.status.replace('_',' ') }}){% endif %}</span>
           {% endif %}
-          <span>{{ s.price_zar | zar }} · {{ s.listing_status.replace('_', ' ') }}</span>
+          <span>{{ s.price | zar }} · {{ s.status.replace('_', ' ') if s.status else '—' }}</span>
         </div>
         <div class="muted">{{ s.title }}</div>
-        {% if s.listing_status in ['active', 'relisted'] %}
+        {% if s.url %}
           <div class="muted tiny">{{ s.url }}</div>
         {% endif %}
-        <div class="muted tiny">Raw variant preserved: {{ s.variant_raw }}</div>
       </li>
       {% endfor %}
     </ul>
