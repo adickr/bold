@@ -8,7 +8,7 @@ from app.config import Settings
 def test_autotrader_western_cape_url_includes_province_id():
     settings = Settings(preferred_province="Western Cape")
     c = AutoTraderCollector(settings=settings)
-    assert "/western-cape/p-9/toyota/fortuner" in c.search_base_url()
+    assert "/western-cape/p-9/toyota/fortuner/4x4" in c.search_base_url()
     params = c.build_search_params(page=3)
     assert params["pagenumber"] == 3
     assert params["rcp"] == settings.collector_results_per_page

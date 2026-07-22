@@ -118,12 +118,12 @@ def location_matches_province(location: str | None, province: str | None) -> boo
 
 
 def _drivetrain_matches(value: str | None, wanted: str) -> bool:
-    """Match drivetrain. For 4x4 preference, keep unclear listings (exclude only 4x2)."""
+    """Match drivetrain. 4x4 filter requires an explicit 4x4/4wd label."""
     right = wanted.lower().replace(" ", "")
     left = (value or "").lower().replace(" ", "")
     if right in {"4x4", "4wd", "awd"}:
         if not left:
-            return True
+            return False
         if left in {"4x2", "2wd"} or "4x2" in left:
             return False
         return left in {"4x4", "4wd", "awd"} or "4x4" in left or "4wd" in left

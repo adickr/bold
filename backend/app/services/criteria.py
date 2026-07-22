@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from app.config import Settings, get_settings
 from app.schemas.listings import ListingPayload, VariantInfo
@@ -52,15 +53,24 @@ def evaluate_listing(
         return CriteriaResult(False, reasons=["not_fortuner"], variant=variant)
 
     drivetrain = variant.drivetrain or listing.drivetrain
+    path = (urlparse(listing.url or "").path or "").lower()
+    if re.search(r"(?:^|[-_/])4x2(?:[-_/]|$)", path):
+        drivetrain = "4x2"
+    elif re.search(r"(?:^|[-_/])4x4(?:[-_/]|$)", path) and drivetrain != "4x2":
+        drivetrain = drivetrain or "4x4"
+
     if drivetrain == "4x2":
         risks.append("4x2_drivetrain")
         return CriteriaResult(False, reasons=["4x2_excluded"], risk_flags=risks, variant=variant)
 
-    # If drivetrain unknown, keep but flag for review (many search pages omit it)
-    if drivetrain is None:
-        risks.append("drivetrain_unclear")
-    elif drivetrain != "4x4":
-        return CriteriaResult(False, reasons=["non_4x4"], risk_flags=risks, variant=variant)
+    # Hard buyer pref: only keep confirmed 4x4 (filter-chip noise must not invent it)
+    if drivetrain != "4x4":
+        return CriteriaResult(
+            False,
+            reasons=["drivetrain_unclear" if drivetrain is None else "non_4x4"],
+            risk_flags=risks + (["drivetrain_unclear"] if drivetrain is None else []),
+            variant=variant,
+        )
 
     price = listing.price_zar
     mileage = listing.mileage_km

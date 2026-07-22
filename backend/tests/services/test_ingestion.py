@@ -26,8 +26,18 @@ def test_excludes_4x2_and_accepts_4x4():
         mileage_km=50000,
         drivetrain="4x4",
     )
+    unclear = ListingPayload(
+        source="t",
+        source_listing_id="1b",
+        url="http://x",
+        title="2021 Toyota Fortuner 2.8 VX",
+        price_zar=600000,
+        mileage_km=50000,
+        drivetrain=None,
+    )
     assert evaluate_listing(bad).accepted is False
     assert evaluate_listing(good).accepted is True
+    assert evaluate_listing(unclear).accepted is False
 
 
 def test_stretch_price_flagged():

@@ -42,9 +42,9 @@ class AutoTraderCollector(BaseCollector):
     source = "autotrader"
     category = "marketplace"
 
-    SEARCH_URL = "https://www.autotrader.co.za/cars-for-sale/toyota/fortuner"
+    SEARCH_URL = "https://www.autotrader.co.za/cars-for-sale/toyota/fortuner/4x4"
     # Province URLs need the province id segment (p-9 = Western Cape)
-    SEARCH_URL_WC = "https://www.autotrader.co.za/cars-for-sale/western-cape/p-9/toyota/fortuner"
+    SEARCH_URL_WC = "https://www.autotrader.co.za/cars-for-sale/western-cape/p-9/toyota/fortuner/4x4"
 
     def search_base_url(self) -> str:
         preferred = (self.settings.preferred_province or "").strip().lower()
@@ -98,6 +98,7 @@ class AutoTraderCollector(BaseCollector):
                 logger.exception("AutoTrader Playwright search failed")
 
         listings = [x for x in all_listings if self.is_detail_url(x.url)]
+        listings = [x for x in listings if self._is_plausible_card(x)]
         listings = self._annotate_search_scope(listings)
         if not listings:
             raise CollectorError("AutoTrader: no listings parsed", parser_broken=True)
@@ -174,26 +175,29 @@ class AutoTraderCollector(BaseCollector):
             text = row.get("text") or ""
             if "fortuner" not in text.lower() and "fortuner" not in href.lower():
                 continue
-            title = self._title_from_text(text) or f"Toyota Fortuner {listing_id}"
-            blob = f"{title} {text} {href}"
+            # Prefer link-local title; never trust giant ancestor text for drivetrain
+            title = self._resolve_title(self._title_from_text(text), href, text)
+            compact = " ".join(
+                (self._title_from_text(text) or "", title, href)
+            )[:200]
             results.append(
                 ListingPayload(
                     source=self.source,
                     source_listing_id=listing_id,
                     url=href.split("?")[0],
                     title=title,
-                    variant_raw=self._title_from_text(text),
+                    variant_raw=title,
                     price_zar=self._extract_price(text),
                     mileage_km=self._extract_mileage(text),
-                    year=self._extract_year(text),
-                    dealer_location=self._location_from_text(text),
-                    drivetrain=detect_drivetrain(blob),
+                    year=self._extract_year(text) or self._extract_year(href),
+                    dealer_location=self._location_from_text(text) or self._location_from_url(href),
+                    drivetrain=self._resolve_drivetrain(href, compact, title),
                     image_urls=[row["img"]] if row.get("img") else [],
                     make="Toyota",
                     model="Fortuner",
                 )
             )
-        return results
+        return [x for x in results if self._is_plausible_card(x)]
 
     def search_with_playwright(self, url: str) -> list[ListingPayload]:
         """Legacy single-URL helper. Prefer _search_all_pages_playwright for collects."""
@@ -238,7 +242,12 @@ class AutoTraderCollector(BaseCollector):
                 if not listing_id or listing_id in seen:
                     continue
                 seen.add(listing_id)
-                container = link.find_parent(["article", "li", "div"]) or link.parent
+                container = link.find_parent(["article", "li"]) or link.find_parent("div") or link.parent
+                # Prefer a compact card ancestor — huge wrappers include filter chips
+                if hasattr(container, "get_text") and len(container.get_text(" ", strip=True)) > 800:
+                    tighter = link.find_parent("article") or link.parent
+                    if tighter is not None:
+                        container = tighter
                 title_el = None
                 if hasattr(container, "select_one"):
                     title_el = container.select_one("h2, h3, .title, [data-testid='listing-title']")
@@ -247,6 +256,9 @@ class AutoTraderCollector(BaseCollector):
                     if container is not None
                     else link.get_text(" ", strip=True)
                 )
+                # Cap meta so page-level filter chips don't dominate
+                if len(meta) > 500:
+                    meta = meta[:500]
                 price_el = (
                     container.select_one(".price, [data-testid='price']")
                     if hasattr(container, "select_one")
@@ -271,25 +283,30 @@ class AutoTraderCollector(BaseCollector):
                             break
                     if not image_urls and img.has_attr("srcset"):
                         image_urls.append(img.get("srcset").split(",")[0].strip().split(" ")[0])
-                title = title_el.get_text(strip=True) if title_el else (link.get_text(strip=True) or None)
-                if "fortuner" not in (title or "").lower() and "fortuner" not in meta.lower() and "fortuner" not in href.lower():
+                raw_title = title_el.get_text(strip=True) if title_el else (link.get_text(strip=True) or None)
+                if (
+                    "fortuner" not in (raw_title or "").lower()
+                    and "fortuner" not in meta.lower()
+                    and "fortuner" not in href.lower()
+                ):
                     continue
+                title = self._resolve_title(raw_title, href, meta)
                 loc = location_el.get_text(strip=True) if location_el else None
                 loc = loc or self._location_from_text(meta) or self._location_from_url(href)
-                blob = f"{title or ''} {meta} {href}"
+                compact = f"{title} {raw_title or ''} {href}"
                 results.append(
                     ListingPayload(
                         source=self.source,
                         source_listing_id=listing_id,
                         url=href,
-                        title=title or f"Toyota Fortuner {listing_id}",
+                        title=title,
                         variant_raw=title,
                         price_zar=self._extract_price(price_el.get_text() if price_el else meta),
                         mileage_km=self._extract_mileage(meta),
-                        year=self._extract_year(meta),
+                        year=self._extract_year(meta) or self._extract_year(href),
                         dealer_location=loc,
                         dealer_name=dealer_el.get_text(strip=True) if dealer_el else None,
-                        drivetrain=detect_drivetrain(blob),
+                        drivetrain=self._resolve_drivetrain(href, compact, title),
                         image_urls=image_urls,
                         make="Toyota",
                         model="Fortuner",
@@ -297,7 +314,7 @@ class AutoTraderCollector(BaseCollector):
                 )
             except Exception:
                 logger.exception("Failed parsing AutoTrader card")
-        return results
+        return [x for x in results if self._is_plausible_card(x)]
 
     def parse_vehicle_data_blobs(self, html: str) -> list[ListingPayload]:
         results: list[ListingPayload] = []
@@ -343,14 +360,20 @@ class AutoTraderCollector(BaseCollector):
         if isinstance(loc, dict):
             loc = loc.get("name") or loc.get("city") or loc.get("province")
         blob = f"{title or ''} {raw_url} {loc or ''}"
-        drivetrain = data.get("drivetrain") or data.get("driveType") or detect_drivetrain(blob)
+        drivetrain = (
+            self.drivetrain_from_url(raw_url)
+            or data.get("drivetrain")
+            or data.get("driveType")
+            or detect_drivetrain(blob)
+        )
+        resolved_title = self._resolve_title(str(title) if title else None, raw_url)
         return [
             ListingPayload(
                 source=self.source,
                 source_listing_id=listing_id,
                 url=raw_url.split("?")[0],
-                title=str(title) if title else None,
-                variant_raw=str(title) if title else None,
+                title=resolved_title,
+                variant_raw=resolved_title,
                 year=data.get("year") or data.get("modelYear"),
                 price_zar=int(price) if price not in (None, "") else None,
                 mileage_km=int(mileage) if mileage not in (None, "") else None,
@@ -412,28 +435,25 @@ class AutoTraderCollector(BaseCollector):
         out: list[ListingPayload] = []
         for item in listings:
             data = item.model_dump()
-            blob = " ".join(
-                filter(
-                    None,
-                    [
-                        data.get("title"),
-                        data.get("variant_raw"),
-                        data.get("dealer_location"),
-                        data.get("url"),
-                    ],
+            # Prefer SEO slug for drivetrain — never invent 4x4 from page filter chips
+            url_dt = self.drivetrain_from_url(data.get("url"))
+            if url_dt:
+                data["drivetrain"] = url_dt
+            elif not data.get("drivetrain"):
+                compact = " ".join(
+                    filter(None, [data.get("title"), data.get("variant_raw")])
                 )
-            )
-            if not data.get("drivetrain"):
-                data["drivetrain"] = detect_drivetrain(blob)
+                data["drivetrain"] = detect_drivetrain(compact) if len(compact) < 180 else None
+            if self._is_chip_title(data.get("title")):
+                data["title"] = self._resolve_title(data.get("title"), data.get("url"))
+                data["variant_raw"] = data["title"]
             loc = (data.get("dealer_location") or "").strip()
             if not loc:
-                # Prefer suburb parsed from URL slug, else province label
                 data["dealer_location"] = self._location_from_url(data.get("url") or "") or preferred
             elif "western cape" not in loc.lower() and not _LOCATION_HINT_RE.search(loc):
-                # Search was WC-scoped; keep suburb text but attach province
                 data["dealer_location"] = f"{loc}, {preferred}"
             out.append(ListingPayload.model_validate(data))
-        return out
+        return [x for x in out if self._is_plausible_card(x) and x.drivetrain != "4x2"]
 
     @staticmethod
     def _location_from_text(text: str) -> str | None:
@@ -473,6 +493,95 @@ class AutoTraderCollector(BaseCollector):
         tail = path.rstrip("/").split("/")[-1]
         return tail if tail.isdigit() and len(tail) >= 6 else None
 
+
+    @classmethod
+    def drivetrain_from_url(cls, url: str | None) -> str | None:
+        """Prefer SEO slug over noisy card text (filters inject '4x4' / 'AT')."""
+        path = (urlparse(url or "").path or "").lower()
+        # Explicit 4x2 in slug wins even if page filters mention 4x4
+        if re.search(r"(?:^|[-_/])4x2(?:[-_/]|$)", path) or re.search(r"(?:^|[-_/])4-x-2(?:[-_/]|$)", path):
+            return "4x2"
+        if re.search(r"(?:^|[-_/])4x4(?:[-_/]|$)", path) or re.search(r"(?:^|[-_/])4-x-4(?:[-_/]|$)", path):
+            return "4x4"
+        if re.search(r"(?:^|[-_/])4wd(?:[-_/]|$)", path):
+            return "4x4"
+        return None
+
+    @classmethod
+    def title_from_url(cls, url: str | None) -> str | None:
+        path = urlparse(url or "").path
+        m = re.search(r"/car-for-sale/toyota/fortuner/([^/]+)/\d{6,}", path or "", re.I)
+        if not m:
+            return None
+        slug = m.group(1).replace("-", " ").strip()
+        if not slug or slug.isdigit():
+            return None
+        return f"Toyota Fortuner {slug}"
+
+    @classmethod
+    def _is_chip_title(cls, title: str | None) -> bool:
+        t = (title or "").strip()
+        if not t:
+            return True
+        if re.fullmatch(r"(?i)(?:toyota\s+)?(?:fortuner\s+)?4x[24](?:\s*(?:a/?t|m/?t|auto(?:matic)?))?", t):
+            return True
+        if "fortuner" not in t.lower() and len(t) < 20:
+            return True
+        return False
+
+    @classmethod
+    def _is_plausible_card(cls, item: ListingPayload) -> bool:
+        """Drop rows contaminated by search filter chips (fake 100k km / '4x4 AT')."""
+        url = item.url or ""
+        title = item.title or ""
+        path = urlparse(url).path or ""
+        slug_part = re.sub(r"/\d{6,}/?$", "", path)
+        blob = f"{title} {item.variant_raw or ''} {slug_part}"
+        if not cls.is_detail_url(url):
+            return False
+        if "fortuner" not in blob.lower():
+            return False
+        if cls.drivetrain_from_url(url) == "4x2":
+            return False
+        # Chip titles only OK when the SEO slug itself has engine/year/trim evidence
+        engineish = re.search(
+            r"\b20[0-2]\d\b|\b2[.\s-][48]\b|\b2[48]gd\b|gd-?6|\bvx\b|gr-?s|legend",
+            blob,
+            re.I,
+        )
+        if cls._is_chip_title(title) and not engineish:
+            return False
+        if not engineish:
+            return False
+        return True
+
+    @classmethod
+    def _resolve_title(cls, title: str | None, url: str | None, meta: str | None = None) -> str:
+        if title and not cls._is_chip_title(title) and "fortuner" in title.lower():
+            return title
+        from_meta = cls._title_from_text(meta or "")
+        if from_meta and not cls._is_chip_title(from_meta):
+            return from_meta
+        from_url = cls.title_from_url(url)
+        if from_url:
+            return from_url
+        listing_id = cls.listing_id_from_url(url or "") or "unknown"
+        return f"Toyota Fortuner {listing_id}"
+
+    @classmethod
+    def _resolve_drivetrain(cls, url: str | None, *text_bits: str | None) -> str | None:
+        from_url = cls.drivetrain_from_url(url)
+        if from_url:
+            return from_url
+        # Only trust compact title/variant — not giant card ancestors with filter chips
+        for bit in text_bits:
+            if not bit or len(bit) > 180:
+                continue
+            dt = detect_drivetrain(bit)
+            if dt:
+                return dt
+        return None
+
     @staticmethod
     def _dedupe(listings: list[ListingPayload]) -> list[ListingPayload]:
         out: dict[str, ListingPayload] = {}
@@ -501,6 +610,12 @@ class AutoTraderCollector(BaseCollector):
             " ",
             text or "",
         )
+        # Range chips: "0 - 100 000 km" / "0–99999 km"
+        cleaned = re.sub(
+            r"(?i)\b\d{1,3}(?:[ \t]\d{3})?\s*[-–—to]+\s*[\d\s,]+\s*km\b",
+            " ",
+            cleaned,
+        )
         candidates: list[int] = []
         for m in re.finditer(
             r"(?<!\d)(\d{1,3}(?:[ \t]\d{3}){0,2}|\d{4,6})[ \t]*km\b",
@@ -515,7 +630,9 @@ class AutoTraderCollector(BaseCollector):
                 candidates.append(val)
         if not candidates:
             return None
-        # Card odometer is usually the last plausible km on the card
+        # Exact buyer-filter ceilings are almost always chips when alone
+        if len(candidates) == 1 and candidates[0] in {100_000, 99_999, 110_000, 150_000, 200_000}:
+            return None
         return candidates[-1]
 
     @staticmethod
