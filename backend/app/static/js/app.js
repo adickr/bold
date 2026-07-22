@@ -192,6 +192,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     if (!stats) return;
     const map = {
       active_matching: stats.active_matching,
+      new_today: stats.new_today,
       reductions_this_week: stats.reductions_this_week,
       median_asking_price: zar(stats.median_asking_price),
     };
@@ -431,13 +432,9 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     if (iso) el.textContent = formatFetchTime(iso);
   });
 
-  function renderPriceDistribution(buckets, medianPrice) {
+  function renderPriceDistribution(buckets, _medianPrice) {
     const section = document.querySelector("[data-price-dist]");
     if (!section) return;
-    const headMeta = section.querySelector(".section-head .mono, .section-head [data-price-median]");
-    if (headMeta && medianPrice != null) {
-      headMeta.textContent = `Median ${zar(medianPrice)}`;
-    }
     let chart = section.querySelector("[data-price-chart]");
     const empty = section.querySelector("[data-price-empty]");
     if (!buckets.length) {
@@ -465,12 +462,27 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     chart.innerHTML = buckets
       .map((b) => {
         const count = Number(b.count) || 0;
+        const newCount = Number(b.new_count) || 0;
+        const priorCount =
+          b.prior_count != null ? Number(b.prior_count) || 0 : Math.max(0, count - newCount);
         const label = escapeHtml(b.label || "");
         const emptyCls = count === 0 ? " is-empty" : "";
-        const n = count ? String(count) : "";
-        return `<div class="price-bar${emptyCls}" style="--n: ${count}" title="${count} car${count === 1 ? "" : "s"} · ${label}">
-          <span class="n">${n}</span>
-          <span class="bar" aria-hidden="true"></span>
+        const countLabel = count ? String(count) : "";
+        const delta = newCount
+          ? `<span class="delta">+${newCount}</span>`
+          : "";
+        const segs = [
+          priorCount
+            ? `<span class="seg prior" style="flex: ${priorCount} 1 0"></span>`
+            : "",
+          newCount
+            ? `<span class="seg new" style="flex: ${newCount} 1 0"></span>`
+            : "",
+        ].join("");
+        const tipExtra = newCount ? ` · ${newCount} new today` : "";
+        return `<div class="price-bar${emptyCls}" style="--n: ${count}; --new: ${newCount}; --prior: ${priorCount}" title="${count} car${count === 1 ? "" : "s"}${tipExtra} · ${label}">
+          <span class="n">${countLabel}${delta}</span>
+          <span class="bar" aria-hidden="true">${segs}</span>
           <span class="lbl">${label}</span>
         </div>`;
       })

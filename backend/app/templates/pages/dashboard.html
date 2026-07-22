@@ -173,27 +173,6 @@
     </p>
     {% endif %}
   </div>
-  <div class="hero-market" data-live-stats>
-    <p class="market-strip">
-      <span><strong class="mono" data-stat="active_matching">{{ stats.active_matching }}</strong> active</span>
-      <span class="fetch-sep">·</span>
-      <span><strong class="mono" data-stat="reductions_this_week">{{ stats.reductions_this_week }}</strong> cuts this week</span>
-      <span class="fetch-sep">·</span>
-      <span>median <strong class="mono" data-stat="median_asking_price">{{ stats.median_asking_price | zar }}</strong></span>
-    </p>
-    {% set mh = stats.market_history %}
-    <div class="market-spark" data-market-spark
-         data-history='{{ (mh or {}) | tojson | forceescape }}'>
-      <div class="spark-chart" data-spark-chart></div>
-      <p class="muted tiny" data-spark-label>
-        {% if mh and mh.known_points and mh.known_points < 2 %}
-          Today · {{ stats.active_matching }} active matches (trend builds daily)
-        {% else %}
-          {{ (mh.label if mh else 'Active matches · last 30 days') }}
-        {% endif %}
-      </p>
-    </div>
-  </div>
 </section>
 
 <section class="spotlight-grid" data-live-spotlights>
@@ -243,25 +222,61 @@
   </article>
 </section>
 
-<section class="price-dist" data-price-dist>
+<section class="market-overview" data-price-dist data-live-stats>
   <div class="section-head">
     <div>
-      <h2>Asking price distribution</h2>
-      <p class="muted tiny">WC · 4x4 · ≤100k km — how many cars sit in each R50k band</p>
+      <h2>Market snapshot</h2>
+      <p class="muted tiny">WC · 4x4 · ≤100k km — stock by asking-price band</p>
     </div>
-    {% if stats.median_asking_price %}
-    <span class="muted tiny mono" data-price-median>Median {{ stats.median_asking_price | zar }}</span>
-    {% endif %}
   </div>
+
+  <div class="market-overview-top">
+    <p class="market-strip">
+      <span><strong class="mono" data-stat="active_matching">{{ stats.active_matching }}</strong> active</span>
+      <span class="fetch-sep">·</span>
+      <span><strong class="mono" data-stat="new_today">{{ stats.new_today }}</strong> new today</span>
+      <span class="fetch-sep">·</span>
+      <span><strong class="mono" data-stat="reductions_this_week">{{ stats.reductions_this_week }}</strong> cuts this week</span>
+      <span class="fetch-sep">·</span>
+      <span>median <strong class="mono" data-stat="median_asking_price">{{ stats.median_asking_price | zar }}</strong></span>
+    </p>
+
+    {% set mh = stats.market_history %}
+    <div class="market-spark" data-market-spark
+         data-history='{{ (mh or {}) | tojson | forceescape }}'>
+      <div class="spark-chart" data-spark-chart></div>
+      <p class="muted tiny" data-spark-label>
+        {% if mh and mh.known_points and mh.known_points < 2 %}
+          Today · {{ stats.active_matching }} active matches (trend builds daily)
+        {% else %}
+          {{ (mh.label if mh else 'Active matches · last 30 days') }}
+        {% endif %}
+      </p>
+    </div>
+  </div>
+
+  <div class="price-legend" data-price-legend>
+    <span class="leg prior"><i></i> Already listed</span>
+    <span class="leg new"><i></i> New today</span>
+  </div>
+
   {% if stats.price_distribution %}
   {% set max_count = (stats.price_distribution | map(attribute='count') | max) or 1 %}
   <div class="price-chart" data-price-chart style="--max-count: {{ max_count }}">
     {% for b in stats.price_distribution %}
+    {% set new_n = b.new_count or 0 %}
+    {% set prior_n = b.prior_count if b.prior_count is defined else (b.count - new_n) %}
     <div class="price-bar {% if b.count == 0 %}is-empty{% endif %}"
-         style="--n: {{ b.count }}"
-         title="{{ b.count }} car{{ 's' if b.count != 1 else '' }} · {{ b.label }}">
-      <span class="n">{% if b.count %}{{ b.count }}{% endif %}</span>
-      <span class="bar" aria-hidden="true"></span>
+         style="--n: {{ b.count }}; --new: {{ new_n }}; --prior: {{ prior_n }}"
+         title="{{ b.count }} car{{ 's' if b.count != 1 else '' }}{% if new_n %} · {{ new_n }} new today{% endif %} · {{ b.label }}">
+      <span class="n">
+        {% if b.count %}{{ b.count }}{% endif %}
+        {% if new_n %}<span class="delta">+{{ new_n }}</span>{% endif %}
+      </span>
+      <span class="bar" aria-hidden="true">
+        {% if prior_n %}<span class="seg prior" style="flex: {{ prior_n }} 1 0"></span>{% endif %}
+        {% if new_n %}<span class="seg new" style="flex: {{ new_n }} 1 0"></span>{% endif %}
+      </span>
       <span class="lbl">{{ b.label }}</span>
     </div>
     {% endfor %}

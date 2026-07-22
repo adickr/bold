@@ -741,24 +741,39 @@ def _fetch_change_summary(new: int, updated: int, cuts: int, has_changes: bool) 
 
 
 def build_price_distribution(
-    prices: list[int], *, bucket_zar: int = 50_000
+    prices: list[int] | None = None,
+    *,
+    entries: list[tuple[int, bool]] | None = None,
+    bucket_zar: int = 50_000,
 ) -> list[dict[str, Any]]:
-    """Histogram buckets for asking prices (inclusive low, exclusive high)."""
-    clean = sorted(p for p in prices if p is not None and p > 0)
-    if not clean:
+    """Histogram buckets for asking prices (inclusive low, exclusive high).
+
+    entries: optional (price, is_new_today) pairs for stacked existing/new bars.
+    """
+    if entries is None:
+        pairs = [(p, False) for p in (prices or []) if p is not None and p > 0]
+    else:
+        pairs = [(p, bool(is_new)) for p, is_new in entries if p is not None and p > 0]
+    if not pairs:
         return []
+    clean_prices = sorted(p for p, _ in pairs)
     size = max(10_000, int(bucket_zar))
-    lo = (clean[0] // size) * size
-    hi = ((clean[-1] // size) + 1) * size
+    lo = (clean_prices[0] // size) * size
+    hi = ((clean_prices[-1] // size) + 1) * size
     buckets: list[dict[str, Any]] = []
     for start in range(lo, hi, size):
         end = start + size
-        count = sum(1 for p in clean if start <= p < end)
+        in_bucket = [(p, is_new) for p, is_new in pairs if start <= p < end]
+        new_count = sum(1 for _, is_new in in_bucket if is_new)
+        count = len(in_bucket)
+        prior_count = count - new_count
         buckets.append(
             {
                 "min_price": start,
                 "max_price": end,
                 "count": count,
+                "new_count": new_count,
+                "prior_count": prior_count,
                 "label": _price_bucket_label(start, end),
             }
         )
@@ -798,17 +813,17 @@ def dashboard_stats(db: Session) -> DashboardStats:
     )
     matching = filter_vehicles(db, default_buyer_filters())
     prices = [v.current_lowest_price for v in matching if v.current_lowest_price]
-    new_today = sum(
-        1
-        for v in matching
-        if v.first_seen_at
-        and (
-            v.first_seen_at
-            if v.first_seen_at.tzinfo
-            else v.first_seen_at.replace(tzinfo=timezone.utc)
-        )
-        >= today
-    )
+    price_entries: list[tuple[int, bool]] = []
+    new_today = 0
+    for v in matching:
+        seen = v.first_seen_at
+        if seen and seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        is_new = bool(seen and seen >= today)
+        if is_new:
+            new_today += 1
+        if v.current_lowest_price:
+            price_entries.append((v.current_lowest_price, is_new))
     reductions = (
         db.execute(
             select(PriceEvent).where(PriceEvent.observed_at >= week, PriceEvent.change_zar < 0)
@@ -851,7 +866,7 @@ def dashboard_stats(db: Session) -> DashboardStats:
         new_today=new_today,
         reductions_this_week=len(reductions),
         median_asking_price=median_price,
-        price_distribution=build_price_distribution(prices),
+        price_distribution=build_price_distribution(entries=price_entries),
         last_fetch=build_last_fetch_summary(db),
         market_history=build_market_history(
             db,
