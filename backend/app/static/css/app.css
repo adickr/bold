@@ -318,6 +318,17 @@ tr.is-new-listing {
   display: flex; justify-content: space-between; align-items: end; gap: 1rem; flex-wrap: wrap;
 }
 [data-live-count]:not(:empty)::before { content: ""; }
+.load-more-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+.load-more-wrap[hidden] { display: none; }
+.load-more-wrap .btn-ghost { min-width: 7.5rem; }
 
 #draft-message { width: 100%; min-height: 160px; }
 .footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.78rem; border-top: 1px solid var(--line); padding-top: 1rem; }

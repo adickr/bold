@@ -26,6 +26,13 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
   const btn = document.querySelector("[data-collect-btn]");
   const tbody = document.querySelector("[data-live-tbody]");
   const liveCount = document.querySelector("[data-live-count]");
+  const listingsSection = document.querySelector("[data-live-listings]");
+  const loadMoreWrap = document.querySelector("[data-load-more-wrap]");
+  const loadMoreBtn = document.querySelector("[data-load-more]");
+  const loadMoreMeta = document.querySelector("[data-load-more-meta]");
+  const PAGE_SIZE = 12;
+  let listLimit = Number(listingsSection?.getAttribute("data-list-limit") || PAGE_SIZE);
+  let matchingTotal = Number(listingsSection?.getAttribute("data-matching-count") || 0);
   let pollTimer = null;
   let seenIds = new Set(
     Array.from(document.querySelectorAll("[data-live-tbody] tr[data-vehicle-id]"))
@@ -461,6 +468,26 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     </tr>`;
   }
 
+  function updateLoadMore(shown, matchingCount) {
+    matchingTotal = matchingCount != null ? Number(matchingCount) : matchingTotal;
+    if (listingsSection) {
+      listingsSection.setAttribute("data-list-limit", String(listLimit));
+      listingsSection.setAttribute("data-matching-count", String(matchingTotal || 0));
+    }
+    if (!loadMoreWrap) return;
+    const hasMore = matchingTotal > shown && shown > 0;
+    loadMoreWrap.hidden = !hasMore;
+    if (loadMoreMeta) {
+      loadMoreMeta.textContent = matchingTotal
+        ? `Showing ${shown} of ${matchingTotal}`
+        : "";
+    }
+    if (loadMoreBtn) {
+      loadMoreBtn.disabled = false;
+      loadMoreBtn.textContent = "Load more";
+    }
+  }
+
   function renderVehicles(vehicles, matchingCount, nationwideCount) {
     if (!tbody) return;
     if (liveCount) {
@@ -476,6 +503,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
         extra = `<p class="muted">Keep scanning — results appear here as each source finishes.</p>`;
       }
       tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state"><p class="muted">No vehicles match the current filters yet.</p>${extra}</div></td></tr>`;
+      updateLoadMore(0, matchingCount || 0);
       return;
     }
     const html = vehicles.map((v) => {
@@ -485,13 +513,18 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     }).join("");
     tbody.innerHTML = html;
     vehicles.forEach((v) => seenIds.add(String(v.id)));
+    updateLoadMore(vehicles.length, matchingCount);
+  }
+
+  async function fetchSnapshot() {
+    const res = await fetch(`/live/snapshot?limit=${listLimit}`, { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error(`snapshot ${res.status}`);
+    return res.json();
   }
 
   async function poll() {
     try {
-      const res = await fetch("/live/snapshot?limit=24", { headers: { Accept: "application/json" } });
-      if (!res.ok) throw new Error(`snapshot ${res.status}`);
-      const snap = await res.json();
+      const snap = await fetchSnapshot();
       const status = snap.collect || {};
       renderProgress(status);
       renderStats(snap.stats);
@@ -521,6 +554,23 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     } catch (err) {
       pollTimer = setTimeout(poll, 2000);
     }
+  }
+
+  if (loadMoreBtn) {
+    loadMoreBtn.addEventListener("click", async () => {
+      loadMoreBtn.disabled = true;
+      loadMoreBtn.textContent = "Loading…";
+      listLimit += PAGE_SIZE;
+      try {
+        const snap = await fetchSnapshot();
+        renderStats(snap.stats);
+        renderVehicles(snap.vehicles || [], snap.matching_count, snap.nationwide_count);
+      } catch (_err) {
+        listLimit = Math.max(PAGE_SIZE, listLimit - PAGE_SIZE);
+        loadMoreBtn.disabled = false;
+        loadMoreBtn.textContent = "Load more";
+      }
+    });
   }
 
   if (form) {
