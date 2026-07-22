@@ -122,11 +122,67 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     </a>`;
   }
 
+  function renderMarketSpark(history) {
+    const root = document.querySelector("[data-market-spark]");
+    if (!root) return;
+    const chart = root.querySelector("[data-spark-chart]");
+    const label = root.querySelector("[data-spark-label]");
+    if (label && history && history.label) label.textContent = history.label;
+    if (!chart) return;
+
+    const points = (history && history.points) || [];
+    const known = points
+      .map((p, idx) => ({ idx, value: p.active_count, date: p.date }))
+      .filter((p) => p.value != null);
+    if (!known.length) {
+      chart.innerHTML = `<p class="spark-empty">History builds as daily snapshots accumulate.</p>`;
+      return;
+    }
+
+    const values = known.map((p) => Number(p.value));
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const pad = max === min ? Math.max(2, Math.round(max * 0.05)) : 0;
+    const lo = min - pad;
+    const hi = max + pad || 1;
+    const w = 280;
+    const h = 64;
+    const left = 2;
+    const right = 2;
+    const top = 6;
+    const bottom = 6;
+    const innerW = w - left - right;
+    const innerH = h - top - bottom;
+    const n = Math.max(points.length - 1, 1);
+
+    function xy(idx, value) {
+      const x = left + (idx / n) * innerW;
+      const y = top + innerH - ((value - lo) / (hi - lo || 1)) * innerH;
+      return [x, y];
+    }
+
+    const linePts = known.map((p) => xy(p.idx, p.value));
+    const line = linePts.map((pt, i) => `${i === 0 ? "M" : "L"}${pt[0].toFixed(1)} ${pt[1].toFixed(1)}`).join(" ");
+    const first = linePts[0];
+    const last = linePts[linePts.length - 1];
+    const area = `${line} L${last[0].toFixed(1)} ${(top + innerH).toFixed(1)} L${first[0].toFixed(1)} ${(top + innerH).toFixed(1)} Z`;
+    const tip = last;
+    const tipVal = values[values.length - 1];
+    const title = known.length >= 2
+      ? `${known[0].date} → ${known[known.length - 1].date}`
+      : `Today · ${tipVal} active`;
+
+    chart.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(title)}">
+      <path class="spark-area" d="${area}"></path>
+      <path class="spark-line" d="${line}"></path>
+      <circle class="spark-dot" cx="${tip[0].toFixed(1)}" cy="${tip[1].toFixed(1)}" r="2.6"></circle>
+    </svg>`;
+  }
+
   function renderStats(stats) {
     if (!stats) return;
     const map = {
       active_matching: stats.active_matching,
-      new_today: stats.new_today,
       reductions_this_week: stats.reductions_this_week,
       median_asking_price: zar(stats.median_asking_price),
     };
@@ -140,6 +196,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     renderSpot("most_motivated", stats.most_motivated, "Most motivated");
     renderPriceDistribution(stats.price_distribution || [], stats.median_asking_price);
     renderLastFetch(stats.last_fetch);
+    renderMarketSpark(stats.market_history);
   }
 
   function formatFetchTime(iso) {
@@ -593,6 +650,18 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
   if (panel.dataset.autoPoll === "1" || panel.classList.contains("is-active")) {
     poll();
   }
+
+  // Paint sparkline from server-rendered history on first load
+  (function paintInitialSpark() {
+    const root = document.querySelector("[data-market-spark]");
+    if (!root) return;
+    try {
+      const raw = root.getAttribute("data-history");
+      if (raw) renderMarketSpark(JSON.parse(raw));
+    } catch (_err) {
+      /* ignore */
+    }
+  })();
 })();
 
 (function scoreTipPopup() {

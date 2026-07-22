@@ -110,6 +110,7 @@ class DashboardStats(BaseModel):
     median_asking_price: int | None
     price_distribution: list[dict[str, Any]] = Field(default_factory=list)
     last_fetch: dict[str, Any] | None = None
+    market_history: dict[str, Any] | None = None
     top_deal: dict[str, Any] | None
     best_grs: dict[str, Any] | None
     best_vx: dict[str, Any] | None

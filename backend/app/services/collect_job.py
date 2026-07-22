@@ -167,6 +167,18 @@ def _run_job() -> None:
                 percent=int(((idx + 1) / max(len(sources), 1)) * 95),
             )
 
+        try:
+            from app.db.session import SessionLocal
+            from app.services.market_snapshot import record_market_snapshot
+
+            db = SessionLocal()
+            try:
+                record_market_snapshot(db)
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("Failed to record market snapshot after collect")
+
         _set(
             running=False,
             finished_at=datetime.now(timezone.utc).isoformat(),

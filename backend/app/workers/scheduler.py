@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from statistics import mean, median
+from statistics import median
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -18,7 +18,6 @@ from app.models.entities import (
     CanonicalVehicle,
     DuplicateMatchEvidence,
     ListingStatus,
-    MarketSnapshot,
     PriceEvent,
     SourceListing,
 )
@@ -138,33 +137,9 @@ def send_daily_digest_job() -> None:
 def market_summary_job() -> None:
     db = SessionLocal()
     try:
-        actives = (
-            db.execute(select(CanonicalVehicle).where(CanonicalVehicle.is_active.is_(True)))
-            .scalars()
-            .all()
-        )
-        prices = [v.current_lowest_price for v in actives if v.current_lowest_price]
-        mileages = [v.current_mileage_km for v in actives if v.current_mileage_km]
-        days = [v.days_tracked for v in actives if v.days_tracked is not None]
-        breakdown: dict[str, int] = {"GR-S": 0, "VX": 0, "other": 0}
-        for v in actives:
-            if v.trim == "GR-S" or (v.special_edition or "").startswith("GR"):
-                breakdown["GR-S"] += 1
-            elif v.trim == "VX":
-                breakdown["VX"] += 1
-            else:
-                breakdown["other"] += 1
-        snap = MarketSnapshot(
-            active_count=len(actives),
-            median_price=int(median(prices)) if prices else None,
-            mean_price=float(mean(prices)) if prices else None,
-            median_mileage=int(median(mileages)) if mileages else None,
-            median_days_on_market=float(median(days)) if days else None,
-            variant_breakdown=breakdown,
-            notes="Asking prices only.",
-        )
-        db.add(snap)
-        db.commit()
+        from app.services.market_snapshot import record_market_snapshot
+
+        record_market_snapshot(db)
     finally:
         db.close()
 

@@ -88,6 +88,7 @@ def page_live_snapshot(
             "most_motivated": stats.most_motivated,
             "price_distribution": stats.price_distribution,
             "last_fetch": stats.last_fetch,
+            "market_history": stats.market_history,
         },
         "nationwide_count": len(nationwide),
         "matching_count": len(matching),

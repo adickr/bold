@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.models.entities import CanonicalVehicle, CollectorRun, ListingObservation, PriceEvent, SourceListing, ShortlistEntry, ShortlistStatus
 from app.schemas.listings import DashboardStats, VehicleFilterParams
 from app.services.media import absolute_url, is_valid_marketplace_url, normalise_listing_url, source_label
+from app.services.market_snapshot import build_market_history
 
 # Towns/areas commonly listed without "Western Cape" in the location string.
 _WESTERN_CAPE_HINTS = (
@@ -842,13 +843,20 @@ def dashboard_stats(db: Session) -> DashboardStats:
         if ranked:
             motivated = vehicle_to_dict(ranked[0])
 
+    median_price = int(median(prices)) if prices else None
     return DashboardStats(
         active_matching=len(matching),
         new_today=new_today,
         reductions_this_week=len(reductions),
-        median_asking_price=int(median(prices)) if prices else None,
+        median_asking_price=median_price,
         price_distribution=build_price_distribution(prices),
         last_fetch=build_last_fetch_summary(db),
+        market_history=build_market_history(
+            db,
+            days=30,
+            live_active=len(matching),
+            live_median=median_price,
+        ),
         top_deal=top_deal,
         best_grs=best_grs,
         best_vx=best_vx,

@@ -173,11 +173,20 @@
     </p>
     {% endif %}
   </div>
-  <div class="hero-meta" data-live-stats>
-    <div><span>Active</span><strong data-stat="active_matching">{{ stats.active_matching }}</strong></div>
-    <div><span>New today</span><strong data-stat="new_today">{{ stats.new_today }}</strong></div>
-    <div><span>Cuts this week</span><strong data-stat="reductions_this_week">{{ stats.reductions_this_week }}</strong></div>
-    <div><span>Median ask</span><strong data-stat="median_asking_price">{{ stats.median_asking_price | zar }}</strong></div>
+  <div class="hero-market" data-live-stats>
+    <p class="market-strip">
+      <span><strong class="mono" data-stat="active_matching">{{ stats.active_matching }}</strong> active</span>
+      <span class="fetch-sep">·</span>
+      <span><strong class="mono" data-stat="reductions_this_week">{{ stats.reductions_this_week }}</strong> cuts this week</span>
+      <span class="fetch-sep">·</span>
+      <span>median <strong class="mono" data-stat="median_asking_price">{{ stats.median_asking_price | zar }}</strong></span>
+    </p>
+    {% set mh = stats.market_history %}
+    <div class="market-spark" data-market-spark
+         data-history='{{ (mh or {}) | tojson | forceescape }}'>
+      <div class="spark-chart" data-spark-chart></div>
+      <p class="muted tiny" data-spark-label>{{ (mh.label if mh else 'Active matches · last 30 days') }}</p>
+    </div>
   </div>
 </section>
 
