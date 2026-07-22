@@ -45,12 +45,61 @@ def normalise_colour(colour: str | None) -> str | None:
         "silver me": "silver",
         "grey metallic": "grey",
         "gray": "grey",
+        "graphite grey": "grey",
+        "graphite gray": "grey",
         "black mica": "black",
         "attitude black": "attitude black",
         "oxide bronze": "oxide bronze",
         "emotional red": "emotional red",
     }
     return aliases.get(c, c)
+
+
+# Approximate paint chips for table swatches (asking-listing colour names).
+_COLOUR_SWATCHES: dict[str, str] = {
+    "white": "#f2f2f0",
+    "pearl white": "#f5f4ef",
+    "super white": "#f7f7f5",
+    "glacier white": "#eef1f4",
+    "silver": "#c5c8cc",
+    "silver metallic": "#b8bcc2",
+    "grey": "#7a7f86",
+    "gray": "#7a7f86",
+    "graphite grey": "#5c6168",
+    "graphite gray": "#5c6168",
+    "black": "#1a1c1e",
+    "black mica": "#141618",
+    "attitude black": "#0f1113",
+    "oxide bronze": "#6b4e3a",
+    "bronze": "#8a6240",
+    "brown": "#5c4033",
+    "emotional red": "#9b1c2e",
+    "red": "#a31d2a",
+    "blue": "#2a4f7a",
+    "dark blue": "#1c3558",
+    "green": "#2f5a3c",
+    "beige": "#cbb89a",
+    "gold": "#b8974a",
+    "orange": "#c45a1a",
+    "yellow": "#d4b84a",
+}
+
+
+def colour_swatch_css(colour: str | None) -> str | None:
+    """Return a CSS hex for a listing colour name, if we can map it."""
+    if not colour:
+        return None
+    raw = _clean(colour).lower()
+    if raw in _COLOUR_SWATCHES:
+        return _COLOUR_SWATCHES[raw]
+    norm = normalise_colour(colour)
+    if norm and norm in _COLOUR_SWATCHES:
+        return _COLOUR_SWATCHES[norm]
+    # Fallback: first token (e.g. "Graphite Grey" → try grey)
+    for token in raw.replace("-", " ").split():
+        if token in _COLOUR_SWATCHES:
+            return _COLOUR_SWATCHES[token]
+    return None
 
 
 """Drivetrain / engine / trim normalisation helpers."""

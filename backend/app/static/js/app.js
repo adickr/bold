@@ -495,6 +495,16 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     return `<span class="score score-tip motivation-tip" tabindex="0" data-tip-kind="motivation" data-score-tip="${payload}">${escapeHtml(v.motivation_level)}</span>`;
   }
 
+  function yearCellHtml(v) {
+    const year = escapeHtml(v.year || "—");
+    if (!v.colour && !v.colour_css) return year;
+    const title = escapeHtml(v.colour || "Colour");
+    const swatch = v.colour_css
+      ? `<span class="colour-swatch" style="background: ${escapeHtml(v.colour_css)}" title="${title}" aria-label="Colour ${title}"></span>`
+      : `<span class="colour-swatch is-unknown" title="${title}" aria-label="Colour ${title}"></span>`;
+    return `<span class="year-cell">${swatch}<span>${year}</span></span>`;
+  }
+
   function vehicleRowHtml(v, isNew) {
     const mileage = v.mileage != null ? `${Number(v.mileage).toLocaleString("en-ZA")} km` : "—";
     const sources = (v.sources || [])
@@ -512,7 +522,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       vote === "up" ? "is-thumbs-up" : "",
     ].filter(Boolean).join(" ");
     return `<tr data-vehicle-id="${escapeHtml(v.id)}" class="${rowClass}" data-vote="${escapeHtml(vote)}">
-      <td>${escapeHtml(v.year || "—")}</td>
+      <td>${yearCellHtml(v)}</td>
       <td>
         <a href="${escapeHtml(v.detail_path)}"><strong>${escapeHtml(v.variant || "Fortuner")}</strong>${v.is_stretch ? ' <em class="tag">stretch</em>' : ""}</a>
       </td>

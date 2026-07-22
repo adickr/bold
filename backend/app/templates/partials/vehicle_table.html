@@ -19,7 +19,16 @@
     <tbody data-live-tbody>
       {% for v in vehicles %}
       <tr data-vehicle-id="{{ v.id }}" class="{% if v.vote == 'down' %}is-thumbs-down{% elif v.vote == 'up' %}is-thumbs-up{% endif %}" data-vote="{{ v.vote or '' }}">
-        <td>{{ v.year or '—' }}</td>
+        <td>
+          <span class="year-cell">
+            {% if v.colour_css %}
+            <span class="colour-swatch" style="background: {{ v.colour_css }}" title="{{ v.colour }}" aria-label="Colour {{ v.colour }}"></span>
+            {% elif v.colour %}
+            <span class="colour-swatch is-unknown" title="{{ v.colour }}" aria-label="Colour {{ v.colour }}"></span>
+            {% endif %}
+            <span>{{ v.year or '—' }}</span>
+          </span>
+        </td>
         <td>
           <a href="{{ v.detail_path }}"><strong>{{ v.variant or 'Fortuner' }}</strong>{% if v.is_stretch %} <em class="tag">stretch</em>{% endif %}</a>
         </td>

@@ -14,6 +14,7 @@ from app.models.entities import CanonicalVehicle, CollectorRun, ListingObservati
 from app.schemas.listings import DashboardStats, VehicleFilterParams
 from app.services.media import absolute_url, is_valid_marketplace_url, normalise_listing_url, source_label
 from app.services.market_snapshot import build_market_history
+from app.services.normalise import colour_swatch_css
 
 # Towns/areas commonly listed without "Western Cape" in the location string.
 _WESTERN_CAPE_HINTS = (
@@ -299,6 +300,7 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
         "is_active": v.is_active,
         "drivetrain": v.drivetrain,
         "colour": v.colour,
+        "colour_css": colour_swatch_css(v.colour),
         "engine": v.engine,
         "confirmed": ["price", "mileage", "source_links"],
         "inferred": ["deal_score", "motivation_score", "comparable_stats"],
