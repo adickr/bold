@@ -72,6 +72,17 @@ class IngestionService:
 
         try:
             for payload in payloads:
+                # Marketplace said sale-in-progress / reserved / sold — keep history but deactivate
+                if (payload.availability or "available").lower() in {
+                    "unavailable",
+                    "reserved",
+                    "sold",
+                    "removed",
+                }:
+                    seen_ids.add(payload.source_listing_id)
+                    self._mark_payload_unavailable(payload)
+                    continue
+
                 result = evaluate_listing(payload, self.settings)
                 if not result.accepted or not result.variant:
                     continue
@@ -266,6 +277,43 @@ class IngestionService:
 
         return listing, created, bool(changed_fields)
 
+    def _mark_payload_unavailable(self, payload: ListingPayload) -> None:
+        """Deactivate a listing the marketplace flagged as reserved / sale-in-progress / sold."""
+        listing = self.db.execute(
+            select(SourceListing).where(
+                SourceListing.source == payload.source,
+                SourceListing.source_listing_id == payload.source_listing_id,
+            )
+        ).scalar_one_or_none()
+        if listing is None:
+            logger.info(
+                "Unavailable %s/%s not in DB yet — skipping insert",
+                payload.source,
+                payload.source_listing_id,
+            )
+            return
+        if listing.listing_status != ListingStatus.REMOVED.value:
+            logger.info(
+                "Marking %s/%s removed (marketplace availability=%s)",
+                payload.source,
+                payload.source_listing_id,
+                payload.availability,
+            )
+            listing.listing_status = ListingStatus.REMOVED.value
+            listing.last_seen_at = _utcnow()
+        if listing.canonical_vehicle_id:
+            vehicle = self.db.get(CanonicalVehicle, listing.canonical_vehicle_id)
+            if vehicle:
+                self._refresh_vehicle_active_flag(vehicle)
+
+    def _refresh_vehicle_active_flag(self, vehicle: CanonicalVehicle) -> None:
+        linked = list(vehicle.source_listings or [])
+        vehicle.is_active = any(
+            (x.listing_status or "")
+            in {ListingStatus.ACTIVE.value, ListingStatus.RELISTED.value}
+            for x in linked
+        )
+
     def _mark_missing(self, source: str, seen_ids: set[str]) -> None:
         """Only mark removals after successful scan with findings (caller ensures non-empty)."""
         stmt = select(SourceListing).where(
@@ -293,6 +341,10 @@ class IngestionService:
             if last and now - last >= timedelta(hours=self.settings.hours_until_removed):
                 if listing.consecutive_misses >= self.settings.missed_scans_possibly_removed:
                     listing.listing_status = ListingStatus.REMOVED.value
+            if listing.listing_status == ListingStatus.REMOVED.value and listing.canonical_vehicle_id:
+                vehicle = self.db.get(CanonicalVehicle, listing.canonical_vehicle_id)
+                if vehicle:
+                    self._refresh_vehicle_active_flag(vehicle)
 
     def _assign_canonical(self, listing: SourceListing) -> CanonicalVehicle:
         if listing.canonical_vehicle_id:

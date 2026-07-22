@@ -251,3 +251,62 @@ def test_ingestion_dedup_and_price_history(db_session):
     db_session.refresh(vx)
     assert vx.total_reduction_zar >= 20000
     assert len(vx.price_events) >= 2
+
+
+def test_webuycars_reserved_marks_listing_removed(db_session):
+    """Sale in progress (API Status=Reserved) must leave Best GR-S / active lists."""
+    from app.models.entities import CanonicalVehicle, ListingStatus, SourceListing
+
+    settings = get_settings()
+    service = IngestionService(db_session, settings)
+    vehicle = CanonicalVehicle(
+        year=2025,
+        make="Toyota",
+        model="Fortuner",
+        variant_normalised="2.8 GD-6 GR-S 4x4",
+        trim="GR-S",
+        drivetrain="4x4",
+        current_lowest_price=859900,
+        deal_score=90,
+        is_active=True,
+    )
+    db_session.add(vehicle)
+    db_session.flush()
+    listing = SourceListing(
+        source="webuycars",
+        source_listing_id="CB2B10753",
+        url="https://www.webuycars.co.za/buy-a-car/CB2B10753",
+        title="2025 Toyota Fortuner 2.8gd-6 4x4 Gr-S Auto",
+        year=2025,
+        make="Toyota",
+        model="Fortuner",
+        drivetrain="4x4",
+        price_zar=859900,
+        mileage_km=7489,
+        listing_status=ListingStatus.ACTIVE.value,
+        canonical_vehicle_id=vehicle.id,
+    )
+    db_session.add(listing)
+    db_session.commit()
+
+    service.ingest_payloads(
+        "webuycars",
+        [
+            ListingPayload(
+                source="webuycars",
+                source_listing_id="CB2B10753",
+                url="https://www.webuycars.co.za/buy-a-car/CB2B10753",
+                title="2025 Toyota Fortuner 2.8gd-6 4x4 Gr-S Auto",
+                year=2025,
+                price_zar=859900,
+                mileage_km=7489,
+                drivetrain="4x4",
+                availability="unavailable",
+            )
+        ],
+        full_scan=False,
+    )
+    db_session.refresh(listing)
+    db_session.refresh(vehicle)
+    assert listing.listing_status == ListingStatus.REMOVED.value
+    assert vehicle.is_active is False

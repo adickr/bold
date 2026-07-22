@@ -33,6 +33,8 @@ class ListingPayload(BaseModel):
     transmission: str | None = None
     fuel_type: str | None = None
     drivetrain: str | None = None
+    # available | unavailable — WeBuyCars "Reserved" / sale-in-progress, etc.
+    availability: str | None = "available"
     raw_payload: dict[str, Any] | None = None
 
 

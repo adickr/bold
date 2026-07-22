@@ -372,6 +372,14 @@ class WeBuyCarsCollector(BaseCollector):
                     drivetrain = "4x4"
                 elif "4X2" in axle.upper() or "4x2" in axle:
                     drivetrain = "4x2"
+            availability = self._sale_availability(row)
+            if availability != "available":
+                logger.info(
+                    "WeBuyCars %s marked %s (Status=%s) — will deactivate",
+                    stock,
+                    availability,
+                    row.get("Status"),
+                )
             results.append(
                 ListingPayload(
                     source=self.source,
@@ -392,12 +400,27 @@ class WeBuyCarsCollector(BaseCollector):
                     transmission=row.get("Gearbox") or row.get("transmission"),
                     fuel_type=row.get("FuelType") or row.get("fuelType"),
                     drivetrain=drivetrain,
+                    availability=availability,
                     make="Toyota",
                     model="Fortuner",
                     raw_payload=row,
                 )
             )
         return results
+
+    @staticmethod
+    def _sale_availability(row: dict[str, Any]) -> str:
+        """WeBuyCars 'Sale in progress' maps to API Status=Reserved."""
+        status = str(row.get("Status") or row.get("status") or "").strip().lower()
+        if status in {"reserved", "sold", "sale in progress", "pending", "withdrawn", "inactive"}:
+            return "unavailable"
+        if status in {"for sale", "available"}:
+            return "available"
+        # Unknown — treat as available only when clearly stocked for sale
+        stock_status = str(row.get("StockStatus") or "").strip().lower()
+        if stock_status in {"sold", "reserved"}:
+            return "unavailable"
+        return "available"
 
     @staticmethod
     def _extract_images(row: dict[str, Any]) -> list[str]:
@@ -505,6 +528,9 @@ class WeBuyCarsCollector(BaseCollector):
                 if not stock or stock in seen:
                     continue
                 text = card.get_text(" ", strip=True)
+                availability = "available"
+                if re.search(r"sale\s+in\s+progress|\breserved\b|\bsold\b", text, re.I):
+                    availability = "unavailable"
                 if "fortuner" not in text.lower() and "Fortuner" not in (card.get("data-model") or ""):
                     if "/Toyota/" in href or "fortuner" in href.lower():
                         pass
@@ -527,6 +553,7 @@ class WeBuyCarsCollector(BaseCollector):
                         dealer_name="WeBuyCars",
                         dealer_stock_number=str(stock),
                         image_urls=[img["src"]] if img is not None and img.has_attr("src") else [],
+                        availability=availability,
                         make="Toyota",
                         model="Fortuner",
                     )

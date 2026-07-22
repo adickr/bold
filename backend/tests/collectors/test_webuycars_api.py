@@ -34,3 +34,53 @@ def test_browser_params_use_q():
     c = WeBuyCarsCollector(settings=Settings(preferred_province="Western Cape"))
     params = c.build_search_params()
     assert params["q"] == "Toyota Fortuner"
+
+
+def test_sale_availability_reserved_is_unavailable():
+    assert (
+        WeBuyCarsCollector._sale_availability({"Status": "Reserved", "StockStatus": "Stock"})
+        == "unavailable"
+    )
+    assert WeBuyCarsCollector._sale_availability({"Status": "For Sale"}) == "available"
+    assert WeBuyCarsCollector._sale_availability({"Status": "Sold"}) == "unavailable"
+
+
+def test_parse_api_marks_reserved_unavailable():
+    c = WeBuyCarsCollector(settings=Settings())
+    payload = {
+        "data": [
+            {
+                "StockNumber": "CB2B10753",
+                "OnlineDescription": "2025 Toyota Fortuner 2.8gd-6 4x4 Gr-S Auto",
+                "Model": "Fortuner",
+                "Make": "Toyota",
+                "Variant": "2.8gd-6 4x4 Gr-S Auto",
+                "Year": 2025,
+                "Price": 859900,
+                "Mileage": 7489,
+                "AxleConfiguration": "4X4",
+                "Status": "Reserved",
+                "StockStatus": "Stock",
+                "Province": "Western Cape",
+                "BranchName": "Brackenfell",
+            },
+            {
+                "StockNumber": "FORSALE1",
+                "OnlineDescription": "2022 Toyota Fortuner 2.8 GD-6 4x4 VX",
+                "Model": "Fortuner",
+                "Make": "Toyota",
+                "Variant": "2.8 GD-6 4x4 VX",
+                "Year": 2022,
+                "Price": 699900,
+                "Mileage": 45000,
+                "AxleConfiguration": "4X4",
+                "Status": "For Sale",
+                "StockStatus": "Stock",
+                "Province": "Western Cape",
+            },
+        ]
+    }
+    rows = c.parse_api_json(payload)
+    by_id = {r.source_listing_id: r for r in rows}
+    assert by_id["CB2B10753"].availability == "unavailable"
+    assert by_id["FORSALE1"].availability == "available"
