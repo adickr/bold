@@ -142,6 +142,69 @@ table.listings th { color: var(--muted); font-weight: 500; font-size: 0.75rem; t
 .stack-form label { display: grid; gap: 0.3rem; font-size: 0.85rem; color: var(--muted); }
 .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.75rem; align-items: center; }
 .inline-form { display: flex; gap: 0.5rem; }
+button:disabled { opacity: 0.65; cursor: wait; }
+
+.collect-progress {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(0,0,0,0.22);
+  display: none;
+}
+.collect-progress.is-active,
+.collect-progress.is-complete { display: block; }
+.collect-progress-head {
+  display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; margin-bottom: 0.55rem;
+}
+.collect-progress-head strong { font-size: 0.95rem; }
+.collect-progress-head .mono { font-family: var(--mono); color: var(--muted); font-size: 0.85rem; }
+.progress-track {
+  height: 8px; border-radius: 999px; background: rgba(255,255,255,0.06);
+  overflow: hidden; border: 1px solid var(--line);
+}
+.progress-bar {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
+  transition: width 0.35s ease;
+  position: relative;
+}
+.collect-progress.is-active .progress-bar::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+  animation: collect-sheen 1.4s linear infinite;
+}
+@keyframes collect-sheen {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+.collect-sources {
+  list-style: none; margin: 0.75rem 0 0; padding: 0;
+  display: grid; gap: 0.4rem;
+}
+.collect-sources li {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 0.55rem; align-items: center;
+  font-size: 0.85rem; color: var(--muted);
+}
+.collect-sources .dot {
+  width: 0.55rem; height: 0.55rem; border-radius: 50%;
+  background: var(--line);
+}
+.collect-sources li[data-status="running"] .dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(196,163,90,0.2);
+  animation: collect-pulse 1s ease-in-out infinite;
+}
+.collect-sources li[data-status="done"] .dot { background: var(--accent-2); }
+.collect-sources li[data-status="failed"] .dot { background: var(--danger); }
+.collect-sources li[data-status="running"] .label { color: var(--ink); }
+.collect-sources .meta { font-family: var(--mono); font-size: 0.78rem; }
+@keyframes collect-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.75; }
+}
+
 #draft-message { width: 100%; min-height: 160px; }
 .footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.78rem; border-top: 1px solid var(--line); padding-top: 1rem; }
 

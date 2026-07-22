@@ -32,7 +32,7 @@ from app.schemas.listings import (
 )
 from app.services.shortlist import ShortlistService, draft_dealer_message
 
-from app.workers.scheduler import run_all_collectors
+from app.services.collect_job import get_collect_status, start_collect_job
 
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[1] / "templates"))
@@ -50,17 +50,14 @@ templates.env.filters["zar"] = _fmt_zar
 
 @router.post("/collect")
 def page_collect(user: str = Depends(require_web_user)):
-    """Trigger a live collection run from the dashboard."""
-    import os
+    """Start a background live collection and show progress on the dashboard."""
+    start_collect_job()
+    return RedirectResponse("/?scanning=1", status_code=303)
 
-    from app.config import get_settings
 
-    os.environ["COLLECTOR_MODE"] = "live"
-    os.environ["USE_PLAYWRIGHT"] = "true"
-    get_settings.cache_clear()
-    results = run_all_collectors()
-    ok = sum(1 for r in results if r.get("success"))
-    return RedirectResponse(f"/?collected={ok}&total={len(results)}", status_code=303)
+@router.get("/collect/status")
+def page_collect_status(user: str = Depends(require_web_user)):
+    return get_collect_status()
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -116,12 +113,14 @@ def page_dashboard(
     user: str = Depends(require_web_user),
     collected: int | None = None,
     total: int | None = None,
+    scanning: int | None = None,
 ):
     stats = dashboard_stats(db)
     vehicles = filter_vehicles(db, default_buyer_filters())[:8]
     nationwide = filter_vehicles(
         db, VehicleFilterParams(active_only=True, sort="price_asc")
     )
+    collect_status = get_collect_status()
     return templates.TemplateResponse(
         request,
         "pages/dashboard.html",
@@ -133,6 +132,8 @@ def page_dashboard(
             "page": "dashboard",
             "collected": collected,
             "total": total,
+            "scanning": bool(scanning) or collect_status.get("running"),
+            "collect_status": collect_status,
         },
     )
 

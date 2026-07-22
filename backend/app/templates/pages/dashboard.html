@@ -6,10 +6,43 @@
     <p class="eyebrow">South African used market</p>
     <h1>Toyota Fortuner 4x4 watch</h1>
     <p class="lede">Cross-site history for Western Cape 4x4s under 100k km — cheapest first, with alerts when something exceptional shows up.</p>
-    <form method="post" action="/collect" class="inline-form" style="margin-top:1rem">
-      <button type="submit">Collect live listings now</button>
+    <form method="post" action="/collect" class="inline-form collect-form" style="margin-top:1rem" data-collect-form>
+      <button type="submit" data-collect-btn {% if scanning %}disabled{% endif %}>
+        {% if scanning %}Scanning…{% else %}Collect live listings now{% endif %}
+      </button>
     </form>
-    <p class="muted tiny">Runs AutoTrader, Cars.co.za and WeBuyCars collectors (may take 1–3 minutes).</p>
+    <p class="muted tiny">Runs AutoTrader, Cars.co.za and WeBuyCars (often 2–5 minutes). Progress updates live below.</p>
+
+    <div class="collect-progress {% if scanning or collect_status.running %}is-active{% endif %}"
+         data-collect-progress
+         {% if scanning or collect_status.running %}data-auto-poll="1"{% endif %}>
+      <div class="collect-progress-head">
+        <strong data-collect-message>{{ collect_status.message or 'Ready to scan' }}</strong>
+        <span class="mono" data-collect-percent>{{ collect_status.percent or 0 }}%</span>
+      </div>
+      <div class="progress-track" aria-hidden="true">
+        <div class="progress-bar" data-collect-bar style="width: {{ collect_status.percent or 0 }}%"></div>
+      </div>
+      <ul class="collect-sources" data-collect-sources>
+        {% for s in collect_status.sources or [] %}
+        <li data-source="{{ s.source }}" data-status="{{ s.status }}">
+          <span class="dot"></span>
+          <span class="label">{{ s.label }}</span>
+          <span class="meta">
+            {% if s.status == 'running' %}scanning…
+            {% elif s.status == 'done' %}{{ s.found if s.found is not none else 'ok' }} found
+            {% elif s.status == 'failed' %}failed
+            {% else %}waiting{% endif %}
+          </span>
+        </li>
+        {% else %}
+        <li data-source="autotrader" data-status="pending"><span class="dot"></span><span class="label">AutoTrader</span><span class="meta">waiting</span></li>
+        <li data-source="cars_co_za" data-status="pending"><span class="dot"></span><span class="label">Cars.co.za</span><span class="meta">waiting</span></li>
+        <li data-source="webuycars" data-status="pending"><span class="dot"></span><span class="label">WeBuyCars</span><span class="meta">waiting</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+
     {% if collected is not none %}
     <p class="lede">Collection finished: {{ collected }}/{{ total }} sources succeeded.
       {% if nationwide_count is defined %}{{ nationwide_count }} active nationwide{% endif %}
