@@ -41,6 +41,21 @@ def _phash_similarity(a: list[Any] | None, b: list[Any] | None) -> float | None:
     return overlap
 
 
+def strong_identity_match(a: SourceListing, b: SourceListing) -> bool:
+    """True when VIN / reg / dealer stock number proves the same physical car."""
+    if a.vin and b.vin and a.vin.upper() == b.vin.upper():
+        return True
+    if a.registration and b.registration and a.registration.upper() == b.registration.upper():
+        return True
+    if (
+        a.dealer_stock_number
+        and b.dealer_stock_number
+        and a.dealer_stock_number.upper() == b.dealer_stock_number.upper()
+    ):
+        return True
+    return False
+
+
 def score_pair(
     a: SourceListing, b: SourceListing, settings: Settings | None = None
 ) -> MatchResult:
@@ -52,6 +67,27 @@ def score_pair(
         nonlocal score
         score += points
         evidence["signals"].append({"signal": signal, "points": points})
+
+    # Marketplace listing IDs are the identity for that site. Soft signals
+    # (dealer + year + stock photos) must never glue different AutoTrader
+    # (or Cars.co.za) ads into one canonical vehicle.
+    if (
+        a.source
+        and b.source
+        and a.source == b.source
+        and a.source_listing_id
+        and b.source_listing_id
+        and a.source_listing_id != b.source_listing_id
+        and not strong_identity_match(a, b)
+    ):
+        evidence["signals"].append({"signal": "same_source_different_id", "points": 0})
+        evidence["score"] = 0.0
+        evidence["confidence"] = MatchConfidence.SEPARATE.value
+        return MatchResult(
+            score=0.0,
+            confidence=MatchConfidence.SEPARATE.value,
+            evidence=evidence,
+        )
 
     if a.vin and b.vin and a.vin.upper() == b.vin.upper():
         add(100, "same_vin")
@@ -66,13 +102,15 @@ def score_pair(
 
     img_sim = _phash_similarity(a.image_phashes, b.image_phashes)
     if img_sim is not None and img_sim >= 0.7:
-        add(80 * img_sim, "near_identical_images")
+        # Cap so image similarity alone cannot auto-merge
+        add(min(40.0, 50 * img_sim), "near_identical_images")
     elif a.image_urls and b.image_urls:
         url_overlap = len(set(a.image_urls) & set(b.image_urls))
+        # Stock / CDN reuse is common across different Fortuners — keep weak
         if url_overlap >= 2:
-            add(80, "identical_image_urls")
+            add(30, "identical_image_urls")
         elif url_overlap == 1:
-            add(40, "shared_image_url")
+            add(15, "shared_image_url")
 
     dealer_a, dealer_b = _norm_str(a.dealer_name), _norm_str(b.dealer_name)
     if dealer_a and dealer_b and dealer_a == dealer_b:

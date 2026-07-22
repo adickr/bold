@@ -22,7 +22,7 @@ from app.models.entities import (
 )
 from app.schemas.listings import ListingPayload
 from app.services.criteria import evaluate_listing
-from app.services.dedup import score_pair, should_auto_merge
+from app.services.dedup import score_pair, should_auto_merge, strong_identity_match
 from app.services.market import compute_comparable_stats, refresh_market_fields
 from app.services.media import absolute_url, normalise_image_urls
 from app.services.scoring import compute_deal_score, compute_motivation_score
@@ -87,6 +87,9 @@ class IngestionService:
                 self._mark_missing(source, seen_ids)
             for listing in accepted_listings:
                 self._assign_canonical(listing)
+
+            # Fix prior over-merges (same marketplace, different ads glued together)
+            self._repair_same_source_merges()
 
             self._rescore_active()
             run.success = True
@@ -292,6 +295,13 @@ class IngestionService:
             # Cheap prefilter
             if listing.year and other.year and abs(listing.year - other.year) > 1:
                 continue
+            # Never soft-merge distinct ads from the same marketplace
+            if (
+                listing.source == other.source
+                and listing.source_listing_id != other.source_listing_id
+                and not strong_identity_match(listing, other)
+            ):
+                continue
             result = score_pair(listing, other, self.settings)
             if best is None or result.score > best[1].score:
                 best = (other, result)
@@ -315,7 +325,11 @@ class IngestionService:
             vehicle.duplicate_match_confidence = result.confidence
             return vehicle
 
-        # Create new canonical vehicle
+        return self._create_canonical_vehicle(listing, alert_new=True)
+
+    def _create_canonical_vehicle(
+        self, listing: SourceListing, *, alert_new: bool = False
+    ) -> CanonicalVehicle:
         vehicle = CanonicalVehicle(
             year=listing.year,
             make=listing.make,
@@ -363,8 +377,75 @@ class IngestionService:
                 )
             )
 
-        self.alerts.maybe_alert_new_listing(vehicle, listing)
+        if alert_new:
+            self.alerts.maybe_alert_new_listing(vehicle, listing)
         return vehicle
+
+    def _repair_same_source_merges(self) -> int:
+        """Split canonicals that glued distinct same-source ads without VIN/reg/stock."""
+        vehicles = list(
+            self.db.execute(
+                select(CanonicalVehicle).options(selectinload(CanonicalVehicle.source_listings))
+            )
+            .scalars()
+            .all()
+        )
+        repaired = 0
+        for vehicle in vehicles:
+            linked = list(vehicle.source_listings or [])
+            if len(linked) < 2:
+                continue
+            by_source: dict[str, list[SourceListing]] = {}
+            for listing in linked:
+                by_source.setdefault(listing.source, []).append(listing)
+
+            for _source, group in by_source.items():
+                if len(group) < 2:
+                    continue
+                clusters: list[list[SourceListing]] = []
+                for listing in sorted(group, key=lambda x: x.id or 0):
+                    placed = False
+                    for cluster in clusters:
+                        if any(strong_identity_match(listing, member) for member in cluster):
+                            cluster.append(listing)
+                            placed = True
+                            break
+                    if not placed:
+                        clusters.append([listing])
+
+                if len(clusters) <= 1:
+                    continue
+
+                # First cluster keeps the existing canonical; others get new vehicles
+                for cluster in clusters[1:]:
+                    for listing in cluster:
+                        listing.canonical_vehicle_id = None
+                    self.db.flush()
+                    anchor = cluster[0]
+                    new_vehicle = self._create_canonical_vehicle(anchor, alert_new=False)
+                    for listing in cluster[1:]:
+                        listing.canonical_vehicle_id = new_vehicle.id
+                    self._sync_canonical_from_listing(new_vehicle, anchor)
+                    repaired += len(cluster)
+
+                stay = clusters[0]
+                self._sync_canonical_from_listing(vehicle, stay[0])
+                logger.info(
+                    "Repaired same-source over-merge on canonical %s (%s clusters)",
+                    vehicle.id,
+                    len(clusters),
+                )
+
+            # Deactivate empty shells
+            remaining = [
+                x for x in (vehicle.source_listings or []) if x.canonical_vehicle_id == vehicle.id
+            ]
+            if not remaining:
+                vehicle.is_active = False
+
+        if repaired:
+            logger.info("Split %s falsely merged same-source listing(s)", repaired)
+        return repaired
 
     def _sync_canonical_from_listing(
         self, vehicle: CanonicalVehicle, listing: SourceListing

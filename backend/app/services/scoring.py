@@ -74,7 +74,8 @@ def compute_deal_score(
         else:
             mileage_score = settings.score_weight_mileage * 0.3
     else:
-        mileage_score = settings.score_weight_mileage * 0.5
+        # Missing mileage is a hard trust gap — demote heavily vs known km
+        mileage_score = settings.score_weight_mileage * 0.1
     breakdown["mileage"] = round(mileage_score, 1)
 
     # Reduction history (15)

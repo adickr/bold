@@ -61,11 +61,27 @@ def test_api_vehicles_defaults_to_wc_4x4_price_asc(client, db_session, auth):
 
 def test_sort_vehicles_price_asc():
     class V:
-        def __init__(self, price):
+        def __init__(self, price, mileage=10_000):
             self.current_lowest_price = price
-            self.current_mileage_km = None
+            self.current_mileage_km = mileage
             self.deal_score = None
             self.year = None
 
     ordered = sort_vehicles([V(300), V(None), V(100), V(200)], "price_asc")
     assert [v.current_lowest_price for v in ordered] == [100, 200, 300, None]
+
+
+def test_sort_demotes_unknown_mileage():
+    class V:
+        def __init__(self, price, mileage):
+            self.current_lowest_price = price
+            self.current_mileage_km = mileage
+            self.deal_score = None
+            self.year = None
+
+    # Cheaper unknown-mileage car should still rank below dearer known-mileage
+    ordered = sort_vehicles(
+        [V(400_000, None), V(650_000, 40_000), V(500_000, 80_000)],
+        "price_asc",
+    )
+    assert [v.current_lowest_price for v in ordered] == [500_000, 650_000, 400_000]

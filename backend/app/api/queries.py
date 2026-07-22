@@ -138,11 +138,14 @@ def _drivetrain_matches(value: str | None, wanted: str) -> bool:
 
 def sort_vehicles(vehicles: list[CanonicalVehicle], sort: str) -> list[CanonicalVehicle]:
     key = (sort or "price_asc").strip().lower()
+    # Unknown mileage is kept in results but demoted below known-mileage cars
+    unknown_mileage = lambda v: v.current_mileage_km is None
     if key == "price_desc":
         return sorted(
             vehicles,
             key=lambda v: (
                 v.current_lowest_price is None,
+                unknown_mileage(v),
                 -(v.current_lowest_price or 0),
             ),
         )
@@ -157,18 +160,27 @@ def sort_vehicles(vehicles: list[CanonicalVehicle], sort: str) -> list[Canonical
     if key == "deal_score_desc":
         return sorted(
             vehicles,
-            key=lambda v: (v.deal_score is None, -(v.deal_score or 0)),
+            key=lambda v: (
+                v.deal_score is None,
+                unknown_mileage(v),
+                -(v.deal_score or 0),
+            ),
         )
     if key == "year_desc":
         return sorted(
             vehicles,
-            key=lambda v: (v.year is None, -(v.year or 0)),
+            key=lambda v: (
+                v.year is None,
+                unknown_mileage(v),
+                -(v.year or 0),
+            ),
         )
-    # Default / price_asc: lowest asking price first
+    # Default / price_asc: known mileage first, then lowest asking price
     return sorted(
         vehicles,
         key=lambda v: (
             v.current_lowest_price is None,
+            unknown_mileage(v),
             v.current_lowest_price or 0,
         ),
     )

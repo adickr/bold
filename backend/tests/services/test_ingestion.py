@@ -70,6 +70,64 @@ def test_fixture_collectors_return_listings():
         assert len(listings) >= 2
 
 
+def test_repair_splits_same_source_over_merge(db_session):
+    """Distinct AutoTrader ads must not stay glued on one canonical vehicle."""
+    from sqlalchemy import select
+
+    from app.models.entities import CanonicalVehicle, ListingStatus, SourceListing
+
+    settings = get_settings()
+    service = IngestionService(db_session, settings)
+
+    vehicle = CanonicalVehicle(
+        year=2024,
+        make="Toyota",
+        model="Fortuner",
+        variant_normalised="2.4 GD-6 4x4 AT",
+        drivetrain="4x4",
+        current_lowest_price=559900,
+        is_active=True,
+    )
+    db_session.add(vehicle)
+    db_session.flush()
+
+    for i, lid in enumerate(("AT_A", "AT_B", "AT_C")):
+        db_session.add(
+            SourceListing(
+                source="autotrader",
+                source_listing_id=lid,
+                url=f"https://www.autotrader.co.za/car-for-sale/toyota/fortuner/x/{28000000 + i}",
+                title=f"2024 Toyota Fortuner listing {lid}",
+                year=2024,
+                make="Toyota",
+                model="Fortuner",
+                variant_normalised="2.4 GD-6 4x4 AT",
+                drivetrain="4x4" if i == 0 else None,
+                price_zar=559900 + i * 1000,
+                mileage_km=57588 if i == 0 else 40000 + i,
+                dealer_name="Cape Gate Toyota",
+                dealer_location="Western Cape",
+                listing_status=ListingStatus.ACTIVE.value,
+                canonical_vehicle_id=vehicle.id,
+                image_urls=["https://images.example.com/shared-stock.jpg"],
+            )
+        )
+    db_session.commit()
+
+    split = service._repair_same_source_merges()
+    db_session.commit()
+    assert split == 2
+
+    at_listings = (
+        db_session.execute(select(SourceListing).where(SourceListing.source == "autotrader"))
+        .scalars()
+        .all()
+    )
+    canonical_ids = {x.canonical_vehicle_id for x in at_listings}
+    assert len(canonical_ids) == 3
+    assert all(cid is not None for cid in canonical_ids)
+
+
 def test_ingestion_dedup_and_price_history(db_session):
     settings = get_settings()
     service = IngestionService(db_session, settings)
