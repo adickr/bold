@@ -373,13 +373,20 @@ class CarsCoZaCollector(BaseCollector):
                 title_el = card.select_one("h2, h3, .vehicle-title, .title")
                 price_el = card.select_one(".price, .vehicle-price")
                 img = card.select_one("img")
+                title = (
+                    title_el.get_text(strip=True)
+                    if title_el
+                    else (link.get_text(strip=True) if link else None)
+                )
+                if not title or len(title) < 12 or "fair deal" in title.lower() or title.lower().startswith("r "):
+                    title = self._title_from_url(href) or title
                 results.append(
                     ListingPayload(
                         source=self.source,
                         source_listing_id=str(listing_id),
                         url=href.split("?")[0],
-                        title=title_el.get_text(strip=True) if title_el else (link.get_text(strip=True) if link else None),
-                        variant_raw=title_el.get_text(strip=True) if title_el else None,
+                        title=title or f"Toyota Fortuner {listing_id}",
+                        variant_raw=title,
                         price_zar=self._price(price_el.get_text() if price_el else text),
                         mileage_km=self._mileage(text),
                         year=self._year(text) or self._year_from_url(href),
@@ -412,13 +419,14 @@ class CarsCoZaCollector(BaseCollector):
             container = link.find_parent(["article", "li", "div"]) or link.parent
             text = container.get_text(" ", strip=True) if container is not None else link.get_text(" ", strip=True)
             img = container.select_one("img") if hasattr(container, "select_one") else None
+            title = self._title_from_url(href) or link.get_text(strip=True) or f"Toyota Fortuner {listing_id}"
             results.append(
                 ListingPayload(
                     source=self.source,
                     source_listing_id=listing_id,
                     url=href.split("?")[0],
-                    title=link.get_text(strip=True) or f"Toyota Fortuner {listing_id}",
-                    variant_raw=link.get_text(strip=True) or None,
+                    title=title,
+                    variant_raw=title,
                     price_zar=self._price(text),
                     mileage_km=self._mileage(text),
                     year=self._year(text) or self._year_from_url(href),
@@ -482,6 +490,14 @@ class CarsCoZaCollector(BaseCollector):
     def _year_from_url(url: str) -> int | None:
         m = re.search(r"/(20[0-2]\d)-", url)
         return int(m.group(1)) if m else None
+
+    @staticmethod
+    def _title_from_url(url: str) -> str | None:
+        m = re.search(r"/for-sale/used/([^/]+)/\d+", url or "", re.I)
+        if not m:
+            return None
+        slug = m.group(1).replace("-", " ").strip()
+        return slug or None
 
     @staticmethod
     def _location_from_url(url: str) -> str | None:

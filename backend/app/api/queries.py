@@ -358,7 +358,10 @@ def dashboard_stats(db: Session) -> DashboardStats:
         db.execute(
             select(CanonicalVehicle)
             .where(CanonicalVehicle.is_active.is_(True))
-            .options(selectinload(CanonicalVehicle.shortlist_entry))
+            .options(
+                selectinload(CanonicalVehicle.shortlist_entry),
+                selectinload(CanonicalVehicle.source_listings),
+            )
         )
         .scalars()
         .all()

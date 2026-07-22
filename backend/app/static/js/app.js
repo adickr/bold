@@ -98,10 +98,15 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
         : key === "most_motivated"
           ? `${escapeHtml(vehicle.motivation_level || "—")} · ${zar(vehicle.price)}`
           : zar(vehicle.price);
-    article.innerHTML = `${h2}<a class="spot-card" href="${escapeHtml(vehicle.detail_path || `/vehicles/${vehicle.id}`)}">
+    const src = vehicle.primary_source || {};
+    const href = src.url || vehicle.detail_path || `/vehicles/${vehicle.id}`;
+    const external = Boolean(src.url);
+    const cta = src.label ? `Open on ${src.label} →` : "Open listing →";
+    const target = external ? ` target="_blank" rel="noopener noreferrer"` : "";
+    article.innerHTML = `${h2}<a class="spot-card" href="${escapeHtml(href)}"${target}>
       <p class="spot-title">${escapeHtml(vehicle.year || "")} ${escapeHtml(vehicle.variant || "Fortuner")}</p>
       <p class="spot-price">${priceLine}</p>
-      <span class="spot-cta">Open vehicle →</span>
+      <span class="spot-cta">${escapeHtml(cta)}</span>
     </a>`;
   }
 
