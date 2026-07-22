@@ -43,21 +43,24 @@ class CarsCoZaCollector(BaseCollector):
     category = "marketplace"
 
     SEARCH_URL = "https://www.cars.co.za/usedcars/"
+    # Path-shaped SEO URL (often lighter CF / same results as query filters)
+    SEARCH_PATH_WC = "https://www.cars.co.za/usedcars/Western-Cape/Toyota/Fortuner/"
 
-    def build_search_params(self, page: int = 1) -> dict[str, Any]:
+    def build_search_params(self, page: int = 1, *, path_mode: bool = False) -> dict[str, Any]:
         # Match the site's own filter query string (see user WC 4x4 ≤100k URL)
         mileage_hi = max(0, int(self.settings.max_mileage_km) - 1)
         params: dict[str, Any] = {
-            "make_model_variant": "Toyota[Fortuner]",
-            "sort": "sort_rank",
+            "sort": "price_asc",
             "price_type": "listing_price",
             "vfs_mileage": f"0-{mileage_hi}",
             "vehicle_axle_config": "4X4",
             "P": page,
         }
-        preferred = (self.settings.preferred_province or "").strip()
-        if preferred:
-            params["vfs_area"] = preferred
+        if not path_mode:
+            params["make_model_variant"] = "Toyota[Fortuner]"
+            preferred = (self.settings.preferred_province or "").strip()
+            if preferred:
+                params["vfs_area"] = preferred
         if self.settings.enforce_max_price:
             params["price_to"] = self.settings.stretch_price_zar
         return params
@@ -65,15 +68,43 @@ class CarsCoZaCollector(BaseCollector):
     def search_url(self, page: int = 1) -> str:
         return f"{self.SEARCH_URL}?{urlencode(self.build_search_params(page))}"
 
+    def search_urls(self, page: int = 1) -> list[str]:
+        """Prefer path URL for WC, then query-string form as fallback."""
+        urls: list[str] = []
+        preferred = (self.settings.preferred_province or "").strip().lower()
+        if preferred in {"western cape", "wc", "western-cape"}:
+            urls.append(
+                f"{self.SEARCH_PATH_WC}?{urlencode(self.build_search_params(page, path_mode=True))}"
+            )
+        urls.append(self.search_url(page))
+        return urls
+
     def search(self) -> list[ListingPayload]:
         all_listings: list[ListingPayload] = []
         seen: set[str] = set()
         max_pages = max(1, self.settings.collector_max_pages)
         total_hint: int | None = None
+        # Stick with whichever URL shape produced results on page 1
+        winning_url_builder = None
 
         for page in range(1, max_pages + 1):
-            url = self.search_url(page)
-            page_listings, page_total = self._search_one_page(url)
+            page_listings: list[ListingPayload] = []
+            page_total: int | None = None
+            if winning_url_builder is not None:
+                page_listings, page_total = self._search_one_page(winning_url_builder(page))
+            else:
+                for url in self.search_urls(page):
+                    page_listings, page_total = self._search_one_page(url)
+                    if page_listings:
+                        # Freeze URL shape for subsequent pages
+                        if "Western-Cape/Toyota/Fortuner" in url:
+                            winning_url_builder = lambda p: (
+                                f"{self.SEARCH_PATH_WC}?"
+                                f"{urlencode(self.build_search_params(p, path_mode=True))}"
+                            )
+                        else:
+                            winning_url_builder = self.search_url
+                        break
             if total_hint is None and page_total is not None:
                 total_hint = page_total
             if not page_listings:
@@ -103,7 +134,10 @@ class CarsCoZaCollector(BaseCollector):
                 break
 
         if not all_listings:
-            raise CollectorError("Cars.co.za: no listings parsed", parser_broken=True)
+            raise CollectorError(
+                "Cars.co.za: no listings parsed (often Cloudflare — try again or use a local browser)",
+                parser_broken=True,
+            )
         return all_listings
 
     def _search_one_page(self, url: str) -> tuple[list[ListingPayload], int | None]:
@@ -118,10 +152,11 @@ class CarsCoZaCollector(BaseCollector):
                 payloads = fetch_json_from_responses(
                     url,
                     url_substring="cars.co.za",
-                    settle_ms=3500,
-                    scroll_rounds=2,
+                    settle_ms=5000,
+                    scroll_rounds=3,
                     wait_through_challenge=True,
                     json_only=True,
+                    timeout_ms=120000,
                 )
                 for payload in payloads:
                     listings.extend(self.parse_api_json(payload))
@@ -136,10 +171,14 @@ class CarsCoZaCollector(BaseCollector):
                     url,
                     wait_selector="a[href*='/for-sale/']",
                     wait_through_challenge=True,
+                    timeout_ms=120000,
                 )
                 self.snapshot_raw("search_rendered", html)
-                listings = self.parse_search_html(html)
-                total = self._parse_total(html)
+                if "just a moment" in html.lower() and "/for-sale/" not in html.lower():
+                    logger.warning("Cars.co.za still on Cloudflare challenge for %s", url)
+                else:
+                    listings = self.parse_search_html(html)
+                    total = self._parse_total(html)
             except Exception:
                 logger.exception("Cars.co.za Playwright HTML failed for %s", url)
 

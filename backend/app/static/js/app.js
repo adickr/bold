@@ -160,13 +160,21 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     </tr>`;
   }
 
-  function renderVehicles(vehicles, matchingCount) {
+  function renderVehicles(vehicles, matchingCount, nationwideCount) {
     if (!tbody) return;
     if (liveCount) {
       liveCount.textContent = matchingCount != null ? `${matchingCount} matching` : "";
     }
     if (!vehicles || !vehicles.length) {
-      tbody.innerHTML = `<tr><td colspan="13"><div class="empty-state"><p class="muted">No vehicles match the current filters yet — keep scanning.</p></div></td></tr>`;
+      let extra = "";
+      if (nationwideCount > 0) {
+        extra = `<p>${nationwideCount} active nationwide — none match WC · 4x4 · ≤100k km yet.
+          <a class="btn-link" href="/listings?sort=price_asc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA</a>
+          · <a class="btn-link" href="/listings?sort=price_asc">Show everything</a></p>`;
+      } else {
+        extra = `<p class="muted">Keep scanning — results appear here as each source finishes.</p>`;
+      }
+      tbody.innerHTML = `<tr><td colspan="13"><div class="empty-state"><p class="muted">No vehicles match the current filters yet.</p>${extra}</div></td></tr>`;
       return;
     }
     const html = vehicles.map((v) => {
@@ -186,7 +194,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       const status = snap.collect || {};
       renderProgress(status);
       renderStats(snap.stats);
-      renderVehicles(snap.vehicles || [], snap.matching_count);
+      renderVehicles(snap.vehicles || [], snap.matching_count, snap.nationwide_count);
 
       const doneCount = (status.sources || []).filter((s) => s.status === "done" || s.status === "failed").length;
       if (doneCount > lastDoneSources) {

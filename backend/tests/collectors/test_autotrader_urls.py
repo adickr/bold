@@ -1,6 +1,8 @@
 """URL validation helpers for collectors."""
 
 from app.collectors.autotrader import AutoTraderCollector
+from app.config import Settings
+from app.schemas.listings import ListingPayload
 
 
 def test_autotrader_detail_url_validation():
@@ -11,3 +13,26 @@ def test_autotrader_detail_url_validation():
     assert AutoTraderCollector.listing_id_from_url(good) == "28096596"
     assert AutoTraderCollector.is_detail_url(bad_short) is False
     assert AutoTraderCollector.is_detail_url(search) is False
+
+
+def test_autotrader_wc_annotate_fills_empty_location():
+    c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
+    rows = c._annotate_search_scope(
+        [
+            ListingPayload(
+                source="autotrader",
+                source_listing_id="28096596",
+                url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6-4x4-vx/28096596",
+                title="2022 Toyota Fortuner 2.8GD-6 4x4 VX",
+                make="Toyota",
+                model="Fortuner",
+            )
+        ]
+    )
+    assert rows[0].dealer_location == "Western Cape"
+    assert rows[0].drivetrain == "4x4"
+
+
+def test_autotrader_location_from_card_text():
+    assert "Brackenfell" in (AutoTraderCollector._location_from_text("Dealer in Brackenfell · R699 900") or "")
+    assert AutoTraderCollector._location_from_text("Sandton dealership") is None

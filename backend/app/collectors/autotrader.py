@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from app.collectors.base import BaseCollector, CollectorError
 from app.collectors.browser import browser_page, playwright_available
 from app.schemas.listings import ListingPayload
+from app.services.normalise import detect_drivetrain
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,19 @@ logger = logging.getLogger(__name__)
 DETAIL_PATH_RE = re.compile(
     r"^/car-for-sale/(?:[^/]+/){1,6}(?P<id>\d{6,})/?$",
     re.I,
+)
+
+# Suburb/city fragments that often appear on AutoTrader cards without "Western Cape"
+_LOCATION_HINT_RE = re.compile(
+    r"(?i)\b("
+    r"western\s*cape|cape\s*town|stellenbosch|paarl|somerset\s*west|"
+    r"brackenfell|bellville|george|knysna|mossel\s*bay|worcester|strand|"
+    r"hermanus|durbanville|milnerton|table\s*view|claremont|goodwood|"
+    r"parow|blouberg|parklands|rondebosch|newlands|kuils\s*river|"
+    r"century\s*city|tyger\s*valley|montague\s*gardens|melkbos|"
+    r"fish\s*hoek|hout\s*bay|atlantis|caledon|swellendam|oudtshoorn|"
+    r"plettenberg|beaufort\s*west"
+    r")\b"
 )
 
 
@@ -75,6 +89,7 @@ class AutoTraderCollector(BaseCollector):
             if len(page_listings) < 8:
                 break
         listings = [x for x in all_listings if self.is_detail_url(x.url)]
+        listings = self._annotate_search_scope(listings)
         if not listings:
             raise CollectorError("AutoTrader: no listings parsed", parser_broken=True)
         return listings
@@ -139,16 +154,20 @@ class AutoTraderCollector(BaseCollector):
                 text = row.get("text") or ""
                 if "fortuner" not in text.lower() and "fortuner" not in href.lower():
                     continue
+                title = self._title_from_text(text) or f"Toyota Fortuner {listing_id}"
+                blob = f"{title} {text} {href}"
                 results.append(
                     ListingPayload(
                         source=self.source,
                         source_listing_id=listing_id,
                         url=href.split("?")[0],
-                        title=self._title_from_text(text) or f"Toyota Fortuner {listing_id}",
+                        title=title,
                         variant_raw=self._title_from_text(text),
                         price_zar=self._extract_price(text),
                         mileage_km=self._extract_mileage(text),
                         year=self._extract_year(text),
+                        dealer_location=self._location_from_text(text),
+                        drivetrain=detect_drivetrain(blob),
                         image_urls=[row["img"]] if row.get("img") else [],
                         make="Toyota",
                         model="Fortuner",
@@ -220,6 +239,9 @@ class AutoTraderCollector(BaseCollector):
                 title = title_el.get_text(strip=True) if title_el else (link.get_text(strip=True) or None)
                 if "fortuner" not in (title or "").lower() and "fortuner" not in meta.lower() and "fortuner" not in href.lower():
                     continue
+                loc = location_el.get_text(strip=True) if location_el else None
+                loc = loc or self._location_from_text(meta) or self._location_from_url(href)
+                blob = f"{title or ''} {meta} {href}"
                 results.append(
                     ListingPayload(
                         source=self.source,
@@ -230,8 +252,9 @@ class AutoTraderCollector(BaseCollector):
                         price_zar=self._extract_price(price_el.get_text() if price_el else meta),
                         mileage_km=self._extract_mileage(meta),
                         year=self._extract_year(meta),
-                        dealer_location=location_el.get_text(strip=True) if location_el else None,
+                        dealer_location=loc,
                         dealer_name=dealer_el.get_text(strip=True) if dealer_el else None,
+                        drivetrain=detect_drivetrain(blob),
                         image_urls=image_urls,
                         make="Toyota",
                         model="Fortuner",
@@ -281,6 +304,11 @@ class AutoTraderCollector(BaseCollector):
             return []
         price = data.get("price") or data.get("priceZar") or data.get("askingPrice")
         mileage = data.get("mileage") or data.get("odometer") or data.get("km")
+        loc = data.get("suburb") or data.get("city") or data.get("province")
+        if isinstance(loc, dict):
+            loc = loc.get("name") or loc.get("city") or loc.get("province")
+        blob = f"{title or ''} {raw_url} {loc or ''}"
+        drivetrain = data.get("drivetrain") or data.get("driveType") or detect_drivetrain(blob)
         return [
             ListingPayload(
                 source=self.source,
@@ -295,11 +323,11 @@ class AutoTraderCollector(BaseCollector):
                 dealer_name=(data.get("dealer") or {}).get("name")
                 if isinstance(data.get("dealer"), dict)
                 else data.get("dealerName"),
-                dealer_location=data.get("suburb") or data.get("city") or data.get("province"),
+                dealer_location=str(loc) if loc else self._location_from_url(raw_url),
                 image_urls=list(data.get("images") or data.get("imageUrls") or []),
                 make="Toyota",
                 model="Fortuner",
-                drivetrain=data.get("drivetrain") or data.get("driveType"),
+                drivetrain=drivetrain,
                 transmission=data.get("transmission"),
                 fuel_type=data.get("fuel") or data.get("fuelType"),
                 raw_payload=data,
@@ -333,7 +361,63 @@ class AutoTraderCollector(BaseCollector):
         return results
 
     def parse_fixture_html(self, html: str) -> list[ListingPayload]:
-        return self.parse_search_html(html)
+        return self._annotate_search_scope(self.parse_search_html(html))
+
+    def _annotate_search_scope(self, listings: list[ListingPayload]) -> list[ListingPayload]:
+        """WC search pages often omit suburb/province on cards — tag so browse filters work.
+
+        AutoTrader's Western Cape URL is already region-scoped; empty location must not
+        cause the dashboard's province filter to hide every result.
+        """
+        preferred = (self.settings.preferred_province or "").strip()
+        is_wc = preferred.lower() in {"western cape", "wc", "western-cape"}
+        if not is_wc:
+            return listings
+
+        out: list[ListingPayload] = []
+        for item in listings:
+            data = item.model_dump()
+            blob = " ".join(
+                filter(
+                    None,
+                    [
+                        data.get("title"),
+                        data.get("variant_raw"),
+                        data.get("dealer_location"),
+                        data.get("url"),
+                    ],
+                )
+            )
+            if not data.get("drivetrain"):
+                data["drivetrain"] = detect_drivetrain(blob)
+            loc = (data.get("dealer_location") or "").strip()
+            if not loc:
+                # Prefer suburb parsed from URL slug, else province label
+                data["dealer_location"] = self._location_from_url(data.get("url") or "") or preferred
+            elif "western cape" not in loc.lower() and not _LOCATION_HINT_RE.search(loc):
+                # Search was WC-scoped; keep suburb text but attach province
+                data["dealer_location"] = f"{loc}, {preferred}"
+            out.append(ListingPayload.model_validate(data))
+        return out
+
+    @staticmethod
+    def _location_from_text(text: str) -> str | None:
+        m = _LOCATION_HINT_RE.search(text or "")
+        if not m:
+            return None
+        found = re.sub(r"\s+", " ", m.group(1)).strip().title()
+        if "western cape" in found.lower():
+            return "Western Cape"
+        if "cape town" in found.lower():
+            return "Cape Town, Western Cape"
+        return f"{found}, Western Cape"
+
+    @staticmethod
+    def _location_from_url(url: str) -> str | None:
+        # .../car-for-sale/toyota/fortuner/.../western-cape/.../{id}
+        if re.search(r"western[\-_]?cape", url or "", re.I):
+            return "Western Cape"
+        return None
 
     @classmethod
     def is_detail_url(cls, url: str | None) -> bool:

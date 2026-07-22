@@ -68,6 +68,23 @@ def test_dashboard_and_listings(client, db_session, auth):
     assert b"Toyota Fortuner" in home.content or b"Fortuner" in home.content
 
 
+def test_live_snapshot_endpoint(client, db_session, auth):
+    _seed(db_session)
+    # Form login so session cookie works for /live/snapshot
+    client.post(
+        "/login",
+        data={"username": auth[0], "password": auth[1], "next": "/"},
+        follow_redirects=False,
+    )
+    snap = client.get("/live/snapshot")
+    assert snap.status_code == 200
+    body = snap.json()
+    assert "vehicles" in body
+    assert "stats" in body
+    assert "collect" in body
+    assert isinstance(body["vehicles"], list)
+
+
 def test_shortlist_flow(client, db_session, auth):
     _seed(db_session)
     vehicles = client.get("/api/vehicles", auth=auth).json()

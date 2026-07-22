@@ -17,6 +17,9 @@ def test_cars_search_url_matches_site_filters():
     assert "usedcars/?" in url
     assert "vehicle_axle_config=4X4" in url
     assert "Western" in url
+    urls = c.search_urls(1)
+    assert any("Western-Cape/Toyota/Fortuner" in u for u in urls)
+    assert any("make_model_variant=" in u for u in urls)
 
 
 def test_parse_detail_anchors():

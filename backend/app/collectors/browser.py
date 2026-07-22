@@ -78,6 +78,14 @@ def _wait_through_challenge(page: Any, timeout_ms: int = 90000) -> None:
         )
     except Exception:
         logger.warning("Challenge wait timed out (title=%s)", page.title())
+    # Extra settle after CF — listing markup often hydrates a beat later
+    try:
+        page.wait_for_selector(
+            "a[href*='/for-sale/'], a[href*='/car-for-sale/']",
+            timeout=min(20000, timeout_ms),
+        )
+    except Exception:
+        pass
 
 
 def fetch_rendered_html(
