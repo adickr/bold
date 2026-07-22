@@ -77,8 +77,13 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       const meta = li.querySelector(".meta");
       if (!meta) return;
       if (s.status === "running") meta.textContent = "scanning…";
-      else if (s.status === "done") meta.textContent = s.found != null ? `${s.found} found` : "done";
-      else if (s.status === "failed") meta.textContent = s.error ? `failed · ${s.error}` : "failed";
+      else if (s.status === "done") {
+        const bits = [];
+        if (s.found != null) bits.push(`${s.found} found`);
+        if (s.new) bits.push(`${s.new} new`);
+        if (s.updated) bits.push(`${s.updated} updated`);
+        meta.textContent = bits.length ? bits.join(" · ") : "done";
+      } else if (s.status === "failed") meta.textContent = s.error ? `failed · ${s.error}` : "failed";
       else meta.textContent = "waiting";
     });
   }
