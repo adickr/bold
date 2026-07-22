@@ -129,6 +129,84 @@ def test_fake_reduction_from_price_spread_is_cleared(db_session):
     assert vehicle.current_lowest_price == 539900
 
 
+def test_stale_price_event_does_not_invent_reduction(db_session):
+    """A leftover PriceEvent without matching observation history is not a cut."""
+    from datetime import datetime, timezone
+
+    from app.models.entities import (
+        CanonicalVehicle,
+        ListingObservation,
+        ListingStatus,
+        PriceEvent,
+        SourceListing,
+    )
+
+    settings = get_settings()
+    service = IngestionService(db_session, settings)
+    now = datetime.now(timezone.utc)
+    vehicle = CanonicalVehicle(
+        year=2026,
+        make="Toyota",
+        model="Fortuner",
+        drivetrain="4x4",
+        original_price=969900,
+        current_lowest_price=779900,
+        total_reduction_zar=190000,
+        is_active=True,
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    db_session.add(vehicle)
+    db_session.flush()
+    listing = SourceListing(
+        source="cars_co_za",
+        source_listing_id="11098128",
+        url="https://www.cars.co.za/for-sale/used/2026-Toyota-Fortuner-2.8-GD-6-Auto-mHev-Western-Cape-Tygervalley/11098128/",
+        title="2026 Toyota Fortuner 2.8 GD-6 Auto (mHev)",
+        year=2026,
+        price_zar=779900,
+        mileage_km=2500,
+        listing_status=ListingStatus.ACTIVE.value,
+        canonical_vehicle_id=vehicle.id,
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    db_session.add(listing)
+    db_session.flush()
+    # Only ever observed at the current ask
+    db_session.add(
+        ListingObservation(
+            source_listing_id=listing.id,
+            observed_at=now,
+            price_zar=779900,
+            mileage_km=2500,
+            source="cars_co_za",
+            availability_status=ListingStatus.ACTIVE.value,
+        )
+    )
+    db_session.add(
+        PriceEvent(
+            canonical_vehicle_id=vehicle.id,
+            source_listing_id=listing.id,
+            observed_at=now,
+            old_price_zar=969900,
+            new_price_zar=779900,
+            change_zar=-190000,
+            source="cars_co_za",
+            note="price_change",
+        )
+    )
+    db_session.commit()
+
+    service._scrub_bogus_price_events()
+    service._scrub_all_price_aggregates()
+    db_session.commit()
+    db_session.refresh(vehicle)
+    assert vehicle.total_reduction_zar == 0
+    assert vehicle.original_price == 779900
+    assert vehicle.current_lowest_price == 779900
+
+
 def test_repair_splits_same_source_over_merge(db_session):
     """Distinct AutoTrader ads must not stay glued on one canonical vehicle."""
     from sqlalchemy import select

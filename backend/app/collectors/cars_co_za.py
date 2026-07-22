@@ -304,14 +304,34 @@ class CarsCoZaCollector(BaseCollector):
             out.append(item)
         return out
 
+    @staticmethod
+    def _drivetrain_from_text(*parts: str | None) -> str | None:
+        """Read axle from URL/title. Cars.co.za 4x4 SEO slugs usually include 4x4.
+
+        Do NOT assume 4x4 from the search filter alone — 4x2 demos (e.g. mHev Auto)
+        sometimes leak into axle-filtered results.
+        """
+        blob = " ".join(p for p in parts if p).lower().replace(" ", "")
+        if re.search(r"(?:^|[-_/])4x2(?:[-_/]|$)", blob) or "4x2" in blob:
+            return "4x2"
+        if re.search(r"(?:^|[-_/])4x4(?:[-_/]|$)", blob) or "4x4" in blob or "4wd" in blob:
+            return "4x4"
+        return None
+
     def _annotate(self, listings: list[ListingPayload]) -> list[ListingPayload]:
-        """Search is already 4x4 + area filtered — fill gaps on parsed rows."""
+        """Fill location gaps; only set drivetrain when URL/title is explicit."""
         preferred = (self.settings.preferred_province or "").strip() or None
         out: list[ListingPayload] = []
         for item in listings:
             data = item.model_dump()
-            if not data.get("drivetrain"):
-                data["drivetrain"] = "4x4"
+            detected = self._drivetrain_from_text(
+                data.get("url"), data.get("title"), data.get("variant_raw")
+            )
+            if detected:
+                data["drivetrain"] = detected
+            elif data.get("drivetrain") == "4x4":
+                # Drop search-scope assumption when the card never says 4x4
+                data["drivetrain"] = None
             if preferred and not data.get("dealer_location"):
                 data["dealer_location"] = preferred
             elif preferred and preferred.lower() not in (data.get("dealer_location") or "").lower():
@@ -394,7 +414,9 @@ class CarsCoZaCollector(BaseCollector):
                     dealer_name=row.get("dealer") or row.get("dealer_name") or row.get("seller"),
                     dealer_location=str(location) if location else None,
                     image_urls=[str(x) for x in images[:12]],
-                    drivetrain="4x4",
+                    drivetrain=self._drivetrain_from_text(
+                        str(url), title, str(row.get("variant") or "")
+                    ),
                     make="Toyota",
                     model="Fortuner",
                     raw_payload=row,
@@ -469,7 +491,7 @@ class CarsCoZaCollector(BaseCollector):
                         dealer_location=self._text(card, ".location, .area, .province")
                         or self._location_from_url(href),
                         image_urls=self._img_urls(img),
-                        drivetrain="4x4",
+                        drivetrain=self._drivetrain_from_text(href, title, text),
                         make="Toyota",
                         model="Fortuner",
                     )
@@ -507,7 +529,7 @@ class CarsCoZaCollector(BaseCollector):
                     year=self._year(text) or self._year_from_url(href),
                     dealer_location=self._location_from_url(href),
                     image_urls=self._img_urls(img),
-                    drivetrain="4x4",
+                    drivetrain=self._drivetrain_from_text(href, title, text),
                     make="Toyota",
                     model="Fortuner",
                 )

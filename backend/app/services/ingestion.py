@@ -551,7 +551,7 @@ class IngestionService:
             self._recompute_price_aggregates(vehicle, linked)
 
     def _scrub_bogus_price_events(self) -> int:
-        """Drop price-change events that came from parser garbage (e.g. price=2)."""
+        """Drop price-change events that are garbage or not backed by listing history."""
         events = list(self.db.execute(select(PriceEvent)).scalars().all())
         removed = 0
         for event in events:
@@ -559,6 +559,26 @@ class IngestionService:
             if any(not (50_000 <= p <= 5_000_000) for p in prices):
                 self.db.delete(event)
                 removed += 1
+                continue
+            if (
+                event.change_zar is not None
+                and event.change_zar < 0
+                and event.source_listing_id is not None
+            ):
+                listing = self.db.get(SourceListing, event.source_listing_id)
+                if listing is None:
+                    self.db.delete(event)
+                    removed += 1
+                    continue
+                first_price, current_price, _ = self._listing_price_span(listing)
+                genuine = 0
+                if first_price is not None and current_price is not None:
+                    genuine = max(0, first_price - current_price)
+                claimed = abs(event.change_zar)
+                # Stale merge / parse flap: event claims a cut the listing never lived
+                if genuine == 0 or claimed > genuine + 5_000:
+                    self.db.delete(event)
+                    removed += 1
         if removed:
             logger.info("Removed %s bogus price events", removed)
             self.db.flush()
@@ -607,10 +627,11 @@ class IngestionService:
     def _recompute_price_aggregates(
         self, vehicle: CanonicalVehicle, linked: list[SourceListing]
     ) -> None:
-        """Set current/original/reduction from listing asks + real price-drop events.
+        """Set current/original/reduction from same-listing observation history.
 
-        Cross-listing ask spreads (or previously false-merged cars) must never look
-        like a seller price cut.
+        Cross-listing ask spreads and stale merge PriceEvents must never look
+        like a seller price cut. A reduction is only first ask → current ask
+        on the *same* marketplace ad.
         """
         active_linked = [
             x
@@ -629,55 +650,66 @@ class IngestionService:
                 filter(None, [vehicle.lowest_observed_price, min(prices)])
             )
 
-        events = (
-            self.db.execute(
-                select(PriceEvent).where(PriceEvent.canonical_vehicle_id == vehicle.id)
-            )
-            .scalars()
-            .all()
-        )
-        # Only events that still belong to listings on this canonical
-        linked_ids = {x.id for x in linked if x.id is not None}
-        events = [e for e in events if e.source_listing_id in linked_ids or e.source_listing_id is None]
+        pool = active_linked or linked
+        best_reduction = 0
+        original_for_display: int | None = None
+        last_cut_at: datetime | None = None
 
-        drop_events = [e for e in events if e.change_zar is not None and e.change_zar < 0]
-        initial_events = [
-            e
-            for e in events
-            if e.old_price_zar is None or (e.note or "") == "initial_price"
-        ]
-
-        if initial_events:
-            first = min(
-                initial_events,
-                key=lambda e: _aware(e.observed_at) or datetime.min.replace(tzinfo=timezone.utc),
-            )
-            vehicle.original_price = first.new_price_zar
-        elif drop_events:
-            first_drop = min(
-                drop_events,
-                key=lambda e: _aware(e.observed_at) or datetime.min.replace(tzinfo=timezone.utc),
-            )
-            vehicle.original_price = first_drop.old_price_zar
-        elif active_linked or linked:
-            anchor = min(
-                active_linked or linked,
+        if pool:
+            earliest = min(
+                pool,
                 key=lambda x: _aware(x.first_seen_at) or datetime.max.replace(tzinfo=timezone.utc),
             )
-            vehicle.original_price = anchor.price_zar
+            first_p, _, _ = self._listing_price_span(earliest)
+            original_for_display = first_p or earliest.price_zar
 
-        if drop_events and vehicle.original_price is not None and vehicle.current_lowest_price is not None:
-            vehicle.total_reduction_zar = max(
-                0, vehicle.original_price - vehicle.current_lowest_price
+        for listing in pool:
+            first_price, current_price, cut_at = self._listing_price_span(listing)
+            if first_price is None or current_price is None:
+                continue
+            if first_price > current_price:
+                reduction = first_price - current_price
+                if reduction > best_reduction:
+                    best_reduction = reduction
+                    original_for_display = first_price
+                    last_cut_at = cut_at
+
+        vehicle.original_price = original_for_display
+        vehicle.total_reduction_zar = best_reduction
+        vehicle.last_reduction_at = last_cut_at if best_reduction > 0 else None
+
+    def _listing_price_span(
+        self, listing: SourceListing
+    ) -> tuple[int | None, int | None, datetime | None]:
+        """First and latest ask on this listing alone; cut timestamp if it fell."""
+        obs: list[ListingObservation] = []
+        if listing.id is not None:
+            obs = list(
+                self.db.execute(
+                    select(ListingObservation)
+                    .where(ListingObservation.source_listing_id == listing.id)
+                    .order_by(ListingObservation.observed_at.asc())
+                )
+                .scalars()
+                .all()
             )
-            vehicle.last_reduction_at = max(
-                (_aware(e.observed_at) for e in drop_events if e.observed_at),
-                default=None,
-            )
-        else:
-            # No observed cut on this car — zero out fake "reductions" from merge pollution
-            vehicle.total_reduction_zar = 0
-            vehicle.last_reduction_at = None
+        priced: list[tuple[int, datetime | None]] = [
+            (o.price_zar, o.observed_at) for o in obs if o.price_zar is not None
+        ]
+        if listing.price_zar is not None:
+            if not priced or priced[-1][0] != listing.price_zar:
+                priced.append((listing.price_zar, listing.last_seen_at))
+        if not priced:
+            return None, None, None
+        first_price = priced[0][0]
+        current_price = priced[-1][0]
+        cut_at = None
+        if current_price < first_price:
+            for price, at in priced:
+                if price == current_price:
+                    cut_at = _aware(at)
+                    break
+        return first_price, current_price, cut_at
 
     def _sync_canonical_from_listing(
         self, vehicle: CanonicalVehicle, listing: SourceListing

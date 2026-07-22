@@ -49,11 +49,36 @@ def test_parse_detail_anchors():
     assert "338011" not in ids
     assert c._parse_total(html) == 55
     annotated = c._annotate(rows)
-    assert all(r.drivetrain == "4x4" for r in annotated)
+    by_ann = {r.source_listing_id: r for r in annotated}
+    assert by_ann["11014602"].drivetrain == "4x4"
+    assert by_ann["10999001"].drivetrain == "4x4"
     # Listing-page scrape is enough: price + mileage present without opening detail
     by_id = {r.source_listing_id: r for r in rows}
     assert by_id["11014602"].price_zar == 619995
     assert by_id["11014602"].mileage_km == 41000
+
+
+def test_cars_does_not_assume_4x4_when_slug_omits_axle():
+    """Tygervalley mHev demo is 4x2 on the detail page — slug has no 4x4."""
+    html = """
+    <div class="vehicle-card" data-vehicle-id="11098128">
+      <a href="/for-sale/used/2026-Toyota-Fortuner-2.8-GD-6-Auto-mHev-Western-Cape-Tygervalley/11098128/">
+        <h2>2026 Toyota Fortuner 2.8 GD-6 Auto (mHev)</h2>
+      </a>
+      <span class="price">R 779 900</span>
+      <span>2 500 Km</span>
+    </div>
+    """
+    c = CarsCoZaCollector(settings=Settings(preferred_province="Western Cape"))
+    rows = c._annotate(c._valid_vehicle_listings(c.parse_search_html(html)))
+    assert len(rows) == 1
+    assert rows[0].price_zar == 779900
+    assert rows[0].drivetrain is None
+    from app.services.criteria import evaluate_listing
+
+    result = evaluate_listing(rows[0])
+    assert result.accepted is False
+    assert "drivetrain_unclear" in result.reasons
 
 
 def test_merge_page_results_dedupes_html_and_api():
