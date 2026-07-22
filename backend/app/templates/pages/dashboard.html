@@ -185,7 +185,13 @@
     <div class="market-spark" data-market-spark
          data-history='{{ (mh or {}) | tojson | forceescape }}'>
       <div class="spark-chart" data-spark-chart></div>
-      <p class="muted tiny" data-spark-label>{{ (mh.label if mh else 'Active matches · last 30 days') }}</p>
+      <p class="muted tiny" data-spark-label>
+        {% if mh and mh.known_points and mh.known_points < 2 %}
+          Today · {{ stats.active_matching }} active matches (trend builds daily)
+        {% else %}
+          {{ (mh.label if mh else 'Active matches · last 30 days') }}
+        {% endif %}
+      </p>
     </div>
   </div>
 </section>

@@ -127,7 +127,6 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     if (!root) return;
     const chart = root.querySelector("[data-spark-chart]");
     const label = root.querySelector("[data-spark-label]");
-    if (label && history && history.label) label.textContent = history.label;
     if (!chart) return;
 
     const points = (history && history.points) || [];
@@ -135,7 +134,8 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       .map((p, idx) => ({ idx, value: p.active_count, date: p.date }))
       .filter((p) => p.value != null);
     if (!known.length) {
-      chart.innerHTML = `<p class="spark-empty">History builds as daily snapshots accumulate.</p>`;
+      if (label) label.textContent = "Active matches · history builds daily";
+      chart.innerHTML = `<p class="spark-empty">No market snapshots yet — run a collect to start the trend.</p>`;
       return;
     }
 
