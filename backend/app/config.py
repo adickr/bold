@@ -92,7 +92,7 @@ class Settings(BaseSettings):
 
     # Scoring weights (must sum conceptually to 100 before penalties)
     score_weight_price: float = 30.0
-    score_weight_spec: float = 20.0
+    score_weight_spec: float = 20.0  # listing completeness; trim-neutral (no VX/GR-S boost)
     score_weight_mileage: float = 15.0
     score_weight_reduction: float = 15.0
     score_weight_time: float = 10.0
