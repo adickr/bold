@@ -256,12 +256,15 @@
   {% endif %}
 </section>
 
-<section data-live-listings>
+<section data-live-listings data-list-limit="{{ list_limit }}" data-matching-count="{{ matching_count }}">
   <div class="section-head">
     <h2>Best matching deals (WC · 4x4 · ≤100k km)</h2>
-    <span class="muted tiny" data-live-count></span>
-    <a class="text-link" href="/listings">View all</a>
+    <span class="muted tiny" data-live-count>{% if matching_count %}{{ matching_count }} matching{% endif %}</span>
   </div>
   {% include "partials/vehicle_table.html" %}
+  <div class="load-more-wrap" data-load-more-wrap {% if not matching_count or (vehicles|length) >= matching_count %}hidden{% endif %}>
+    <button type="button" class="btn-ghost" data-load-more>Load more</button>
+    <span class="muted tiny" data-load-more-meta>Showing {{ vehicles|length }} of {{ matching_count }}</span>
+  </div>
 </section>
 {% endblock %}

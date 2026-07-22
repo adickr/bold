@@ -74,7 +74,7 @@ def page_live_snapshot(
     nationwide = filter_vehicles(
         db, VehicleFilterParams(active_only=True, sort="deal_score_desc")
     )
-    limit = max(1, min(limit, 60))
+    limit = max(1, min(limit, 300))
     return {
         "collect": get_collect_status(),
         "stats": {
@@ -91,6 +91,7 @@ def page_live_snapshot(
         },
         "nationwide_count": len(nationwide),
         "matching_count": len(matching),
+        "limit": limit,
         "vehicles": [vehicle_to_dict(v) for v in matching[:limit]],
     }
 
@@ -151,7 +152,9 @@ def page_dashboard(
     scanning: int | None = None,
 ):
     stats = dashboard_stats(db)
-    vehicles = filter_vehicles(db, default_buyer_filters())[:8]
+    matching = filter_vehicles(db, default_buyer_filters())
+    list_limit = 12
+    vehicles = matching[:list_limit]
     nationwide = filter_vehicles(
         db, VehicleFilterParams(active_only=True, sort="deal_score_desc")
     )
@@ -163,6 +166,8 @@ def page_dashboard(
             "user": user,
             "stats": stats,
             "vehicles": [vehicle_to_dict(v) for v in vehicles],
+            "matching_count": len(matching),
+            "list_limit": list_limit,
             "nationwide_count": len(nationwide),
             "page": "dashboard",
             "collected": collected,
