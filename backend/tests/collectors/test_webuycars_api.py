@@ -16,24 +16,39 @@ def test_pow_solver_meets_difficulty():
     assert digest[0] >> (8 - difficulty) == 0
 
 
-def test_api_body_uses_q_and_4x4():
-    settings = Settings(preferred_province="Western Cape")
+def test_api_body_matches_live_buy_a_car_filters():
+    settings = Settings(preferred_province="Western Cape", max_mileage_km=100_000)
     c = WeBuyCarsCollector(settings=settings)
     body = c.build_api_body(offset=24, size=24)
     assert body["q"] == "Toyota Fortuner"
     assert body["Make"] == ["Toyota"]
     assert body["Model"] == ["Fortuner"]
     assert body["AxleConfiguration"] == ["4X4"]
+    assert body["Kilometers_Gte"] == 0
+    assert body["Kilometers_Lte"] == 100_000
+    assert body["Province"] == ["Western Cape"]
     assert body["to"] == 24
-    # Nationwide collect — WC browse filter is applied in the UI, not here
-    assert body["Province"] is None
     assert "Provinces" not in body
 
 
-def test_browser_params_use_q():
-    c = WeBuyCarsCollector(settings=Settings(preferred_province="Western Cape"))
+def test_browser_params_match_live_buy_a_car_url():
+    c = WeBuyCarsCollector(
+        settings=Settings(preferred_province="Western Cape", max_mileage_km=100_000)
+    )
     params = c.build_search_params()
-    assert params["q"] == "Toyota Fortuner"
+    assert ("q", "Toyota Fortuner") in params
+    assert ("axle", "4X4") in params
+    assert ("province", "Western Cape") in params
+    assert ("km_min", 0) in params
+    assert ("km_max", 100_000) in params
+    assert params.count(("km", 0)) == 1
+    assert params.count(("km", 100_000)) == 1
+    url = c.build_search_url()
+    assert "km_max=100000" in url
+    assert "axle=4X4" in url
+    assert "province=Western+Cape" in url
+    assert "q=Toyota+Fortuner" in url
+    assert url.count("km=") >= 2
 
 
 def test_sale_availability_reserved_is_unavailable():

@@ -4,7 +4,12 @@ Primary path posts to:
   https://appgateway.webuycars.co.za/website-elastic-backend/api/search
 
 using the same PoW flow as the website (challenge → solve → validate →
-x-proof-of-work-token). Playwright intercept remains a fallback.
+x-proof-of-work-token). Filters mirror the live buy-a-car URL:
+
+  /buy-a-car?km_min=0&km_max=100000&km=0&km=100000&axle=4X4
+    &province=Western+Cape&q=Toyota+Fortuner
+
+Playwright intercept remains a fallback.
 """
 
 from __future__ import annotations
@@ -85,17 +90,35 @@ class WeBuyCarsCollector(BaseCollector):
     SEARCH_URL = "https://www.webuycars.co.za/buy-a-car"
     PAGE_SIZE = 24
 
-    def build_search_params(self) -> dict[str, Any]:
-        """Browser URL params (fallback / Playwright). Prefer q= like the live site."""
-        params: dict[str, Any] = {
-            "q": "Toyota Fortuner",
-        }
-        preferred = (self.settings.preferred_province or "").strip().lower()
-        if preferred in {"western cape", "wc", "western-cape"}:
-            params["Province"] = '["Western Cape"]'
+    def build_search_params(self) -> list[tuple[str, Any]]:
+        """Browser URL params matching the live buy-a-car filters.
+
+        Example:
+          /buy-a-car?km_min=0&km_max=100000&km=0&km=100000&axle=4X4
+            &province=Western+Cape&q=Toyota+Fortuner
+        """
+        max_km = int(self.settings.max_mileage_km or 100_000)
+        params: list[tuple[str, Any]] = [
+            ("km_min", 0),
+            ("km_max", max_km),
+            ("km", 0),
+            ("km", max_km),
+            ("axle", "4X4"),
+            ("q", "Toyota Fortuner"),
+        ]
+        preferred = (self.settings.preferred_province or "").strip()
+        if preferred:
+            # Live site uses plain province=Western+Cape (not a JSON array)
+            params.insert(-1, ("province", preferred))
         return params
 
+    def build_search_url(self) -> str:
+        return f"{self.SEARCH_URL}?{urlencode(self.build_search_params())}"
+
     def build_api_body(self, *, offset: int, size: int) -> dict[str, Any]:
+        max_km = int(self.settings.max_mileage_km or 100_000)
+        preferred = (self.settings.preferred_province or "").strip()
+        province: list[str] | None = [preferred] if preferred else None
         body: dict[str, Any] = {
             "to": offset,
             "size": size,
@@ -124,8 +147,8 @@ class WeBuyCarsCollector(BaseCollector):
             "auctionEndDate": None,
             "auctionDurationInSeconds": None,
             "Kilometers_Gte": 0,
-            # 0 = no mileage cap at API level (criteria still applies stretch)
-            "Kilometers_Lte": 0,
+            # Match live buy-a-car km_max / km range
+            "Kilometers_Lte": max_km,
             "Priced_Amount_Sort": "asc",
             "Bid_Amount_Sort": "",
             "Kilometers_Sort": "",
@@ -136,9 +159,8 @@ class WeBuyCarsCollector(BaseCollector):
             "Price_Update_Date_Sort": "",
             "Online_Auction_Date_Sort": "",
             "Online_Auction_In_Progress": "",
-            # Do NOT filter Province here — WeBuyCars WC 4x4 stock is thin;
-            # Western Cape coverage comes mainly from Cars.co.za / AutoTrader.
-            "Province": None,
+            # Match live province=Western+Cape → API Province: ["Western Cape"]
+            "Province": province,
         }
         return body
 
@@ -152,7 +174,7 @@ class WeBuyCarsCollector(BaseCollector):
         except Exception:
             logger.exception("WeBuyCars API search failed")
 
-        url = f"{self.SEARCH_URL}?{urlencode(self.build_search_params())}"
+        url = self.build_search_url()
         if playwright_available() and self.settings.use_playwright:
             try:
                 payloads = fetch_json_from_responses(
@@ -226,7 +248,7 @@ class WeBuyCarsCollector(BaseCollector):
             "Accept": "application/json",
             "Content-Type": "application/json",
             "Origin": "https://www.webuycars.co.za",
-            "Referer": "https://www.webuycars.co.za/buy-a-car?q=Toyota+Fortuner",
+            "Referer": self.build_search_url(),
             "User-Agent": self.settings.user_agent,
         }
         if pow_token:
