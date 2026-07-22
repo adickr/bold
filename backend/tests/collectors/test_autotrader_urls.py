@@ -91,6 +91,58 @@ def test_autotrader_wc_annotate_fills_empty_location():
     assert rows[0].drivetrain == "4x4"
 
 
+def test_autotrader_annotates_4x4_when_slug_omits_it():
+    """Live AT SEO slugs often look like /2.8gd-6/{id} even for 4x4 stock."""
+    c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
+    rows = c._annotate_search_scope(
+        [
+            ListingPayload(
+                source="autotrader",
+                source_listing_id="28406720",
+                url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28406720",
+                title="Toyota Fortuner 2.8GD-6 4x4 VX",
+                variant_raw="2.8GD-6 4x4 VX",
+                make="Toyota",
+                model="Fortuner",
+            )
+        ]
+    )
+    assert len(rows) == 1
+    assert rows[0].drivetrain == "4x4"
+
+
+def test_autotrader_parses_embedded_search_json():
+    html = r"""
+    <html><body><script>
+    {"results":{"pageNumber":1,"pageCount":3,"featuredTiles":[
+      {"resultType":1,"listingId":28593847,
+       "canonicalUrl":"/car-for-sale/toyota/fortuner/2.8gd-6/28593847",
+       "imageUrl":"https://img.autotrader.co.za/46184292",
+       "make":"Toyota","model":"Fortuner","variant":"2.8GD-6 4x4 VX",
+       "makeModelLongVariant":"Toyota Fortuner 2.8GD-6 4x4 VX",
+       "dealerName":"Frank Vos Robertson","dealerSuburbName":"Robertson",
+       "summaryIcons":[
+         {"text":"Used","type":4},
+         {"url":"/icons/mileage.svg","text":"92\u00A0000 km","type":1},
+         {"url":"/icons/transmission-automatic.svg","text":"Automatic","type":1}
+       ],
+       "price":"R 629\u00A0000"}
+    ]},"resultCount":65}
+    </script></body></html>
+    """
+    c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
+    assert c._parse_result_meta(html) == (65, 3)
+    rows = c.parse_search_results_json(html)
+    assert len(rows) == 1
+    assert rows[0].source_listing_id == "28593847"
+    assert rows[0].price_zar == 629000
+    assert rows[0].mileage_km == 92000
+    assert "4x4" in (rows[0].variant_raw or "")
+    annotated = c._annotate_search_scope(rows)
+    assert annotated[0].drivetrain == "4x4"
+    assert "Western Cape" in (annotated[0].dealer_location or "")
+
+
 def test_autotrader_location_from_card_text():
     assert "Brackenfell" in (AutoTraderCollector._location_from_text("Dealer in Brackenfell · R699 900") or "")
     assert AutoTraderCollector._location_from_text("Sandton dealership") is None
