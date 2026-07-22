@@ -68,5 +68,11 @@ def test_motivation_estimate_categories():
     )
     score, level, breakdown = compute_motivation_score(vehicle, dealer_similar_count=3)
     assert level in {"low", "moderate", "high", "very_high"}
+    assert breakdown["days_on_market"] == 25
+    assert breakdown["price_reductions"] == 25
+    assert breakdown["multi_site"] == 12
+    assert breakdown["dealer_stock"] == 10
+    assert breakdown["total"] == score
+    assert "note" in breakdown
     assert breakdown["estimate_only"] is True
     assert score >= 50

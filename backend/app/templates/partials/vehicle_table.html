@@ -36,7 +36,13 @@
           <span class="score">{{ v.deal_score if v.deal_score is not none else '—' }}</span>
           {% endif %}
         </td>
-        <td>{{ v.motivation_level or '—' }}</td>
+        <td>
+          {% if v.motivation_level and v.motivation_breakdown %}
+          <span class="score score-tip motivation-tip" tabindex="0" data-tip-kind="motivation" data-score-tip="{{ v.motivation_breakdown | tojson | forceescape }}">{{ v.motivation_level }}</span>
+          {% else %}
+          <span class="score">{{ v.motivation_level or '—' }}</span>
+          {% endif %}
+        </td>
         <td class="links-cell">
           <div class="source-links">
             {% for s in v.sources if s.status in ['active', 'relisted'] and s.url %}

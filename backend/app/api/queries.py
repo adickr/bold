@@ -284,6 +284,7 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
         "deal_score_breakdown": v.deal_score_breakdown,
         "motivation_score": v.motivation_score,
         "motivation_level": v.motivation_level,
+        "motivation_breakdown": v.motivation_breakdown,
         "source_count": v.source_count,
         "shortlist_status": shortlist.status if shortlist else None,
         "vote": vote_from_shortlist(shortlist),

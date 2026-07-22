@@ -410,7 +410,16 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       return `<span class="score">${escapeHtml(v.deal_score)}</span>`;
     }
     const payload = escapeHtml(JSON.stringify(v.deal_score_breakdown));
-    return `<span class="score score-tip" tabindex="0" data-score-tip="${payload}">${escapeHtml(v.deal_score)}</span>`;
+    return `<span class="score score-tip" tabindex="0" data-tip-kind="deal" data-score-tip="${payload}">${escapeHtml(v.deal_score)}</span>`;
+  }
+
+  function motivationCellHtml(v) {
+    if (!v.motivation_level) return `<span class="score">—</span>`;
+    if (!v.motivation_breakdown) {
+      return `<span class="score">${escapeHtml(v.motivation_level)}</span>`;
+    }
+    const payload = escapeHtml(JSON.stringify(v.motivation_breakdown));
+    return `<span class="score score-tip motivation-tip" tabindex="0" data-tip-kind="motivation" data-score-tip="${payload}">${escapeHtml(v.motivation_level)}</span>`;
   }
 
   function vehicleRowHtml(v, isNew) {
@@ -441,7 +450,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       <td>${escapeHtml(v.days_tracked ?? "—")}</td>
       <td>${v.total_reduction ? zar(v.total_reduction) : "—"}</td>
       <td>${scoreCellHtml(v)}</td>
-      <td>${escapeHtml(v.motivation_level || "—")}</td>
+      <td>${motivationCellHtml(v)}</td>
       <td class="links-cell">${linksHtml}</td>
       <td class="vote-cell">
         <div class="vote-controls" data-vote-controls data-vehicle-id="${escapeHtml(v.id)}">
@@ -537,7 +546,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
 })();
 
 (function scoreTipPopup() {
-  const LABELS = {
+  const DEAL_LABELS = {
     price_value: "Price value",
     completeness: "Completeness",
     mileage: "Mileage",
@@ -547,7 +556,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     risk_penalty: "Risk penalty",
     total: "Total",
   };
-  const ORDER = [
+  const DEAL_ORDER = [
     "price_value",
     "completeness",
     "mileage",
@@ -557,6 +566,27 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     "risk_penalty",
     "total",
   ];
+  const MOTIVATION_LABELS = {
+    days_on_market: "Days on market",
+    price_reductions: "Price reductions",
+    reduction_timing: "Reduction timing",
+    multi_site: "Multi-site listing",
+    dealer_stock: "Dealer similar stock",
+    timing: "End-of-month timing",
+    language_cues: "Clearance language",
+    total: "Total",
+  };
+  const MOTIVATION_ORDER = [
+    "days_on_market",
+    "price_reductions",
+    "reduction_timing",
+    "multi_site",
+    "dealer_stock",
+    "timing",
+    "language_cues",
+    "total",
+  ];
+  const SKIP = new Set(["note", "inferred", "estimate_only", "reasons", "level", "score"]);
 
   const tip = document.createElement("div");
   tip.className = "score-tip-float";
@@ -585,27 +615,48 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     }
   }
 
-  function renderBreakdown(breakdown) {
-    const keys = ORDER.filter((k) => breakdown[k] != null);
+  function renderBreakdown(el, breakdown) {
+    const kind = el.getAttribute("data-tip-kind") || "deal";
+    const labels = kind === "motivation" ? MOTIVATION_LABELS : DEAL_LABELS;
+    const order = kind === "motivation" ? MOTIVATION_ORDER : DEAL_ORDER;
+    const keys = order.filter((k) => breakdown[k] != null);
     for (const k of Object.keys(breakdown)) {
-      if (!keys.includes(k) && k !== "note" && k !== "inferred") keys.push(k);
+      if (!keys.includes(k) && !SKIP.has(k) && typeof breakdown[k] === "number") {
+        keys.push(k);
+      }
     }
     const rows = keys
       .map((k) => {
-        const label = LABELS[k] || k.replace(/_/g, " ");
+        const label = labels[k] || k.replace(/_/g, " ");
         return `<li data-key="${escapeText(k)}"><span>${escapeText(label)}</span><strong>${escapeText(breakdown[k])}</strong></li>`;
       })
       .join("");
+    let body = rows
+      ? `<ul class="score-break">${rows}</ul>`
+      : "";
+    if (!rows && Array.isArray(breakdown.reasons) && breakdown.reasons.length) {
+      body = `<ul class="score-break">${breakdown.reasons
+        .map((r) => `<li><span>${escapeText(String(r).replace(/_/g, " "))}</span><strong>✓</strong></li>`)
+        .join("")}</ul>`;
+    }
     const note = breakdown.note
       ? `<span class="tip-note">${escapeText(breakdown.note)}</span>`
       : "";
-    tip.innerHTML = `<span class="tip-title">Deal score breakdown</span><ul class="score-break">${rows}</ul>${note}`;
+    let title = kind === "motivation" ? "Motivation breakdown" : "Deal score breakdown";
+    if (kind === "motivation") {
+      const level = breakdown.level ? String(breakdown.level).replace(/_/g, " ") : "";
+      const score = breakdown.score != null ? breakdown.score : breakdown.total;
+      if (level || score != null) {
+        title = `Motivation${level ? ` · ${level}` : ""}${score != null ? ` (${score})` : ""}`;
+      }
+    }
+    tip.classList.toggle("motivation", kind === "motivation");
+    tip.innerHTML = `<span class="tip-title">${escapeText(title)}</span>${body}${note}`;
   }
 
   function placeTip(el) {
     const rect = el.getBoundingClientRect();
     tip.hidden = false;
-    // Measure after showing
     const tipRect = tip.getBoundingClientRect();
     let left = rect.left + rect.width / 2 - tipRect.width / 2;
     left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
@@ -623,7 +674,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       hideTimer = null;
     }
     activeEl = el;
-    renderBreakdown(breakdown);
+    renderBreakdown(el, breakdown);
     placeTip(el);
   }
 

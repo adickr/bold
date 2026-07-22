@@ -162,56 +162,66 @@ def compute_motivation_score(
     settings = settings or get_settings()
     score = 0.0
     reasons: list[str] = []
+    components: dict[str, float] = {
+        "days_on_market": 0.0,
+        "price_reductions": 0.0,
+        "reduction_timing": 0.0,
+        "multi_site": 0.0,
+        "dealer_stock": 0.0,
+        "timing": 0.0,
+        "language_cues": 0.0,
+    }
 
     days = vehicle.days_tracked or _days_between(vehicle.first_seen_at)
     if days >= 60:
-        score += 25
+        components["days_on_market"] = 25
         reasons.append("long_days_on_market")
     elif days >= 30:
-        score += 15
+        components["days_on_market"] = 15
         reasons.append("moderate_days_on_market")
     elif days >= 14:
-        score += 8
+        components["days_on_market"] = 8
 
     red = vehicle.total_reduction_zar or 0
     if red >= 30_000:
-        score += 25
+        components["price_reductions"] = 25
         reasons.append("large_total_reduction")
     elif red >= 15_000:
-        score += 15
+        components["price_reductions"] = 15
         reasons.append("meaningful_reduction")
     elif red > 0:
-        score += 8
+        components["price_reductions"] = 8
 
     if vehicle.last_reduction_at:
         since = _days_between(vehicle.last_reduction_at)
         if since <= 7:
-            score += 10
+            components["reduction_timing"] = 10
             reasons.append("recent_reduction")
         elif since >= 30 and days >= 30:
-            score += 8
+            components["reduction_timing"] = 8
             reasons.append("stale_after_reduction")
 
     if (vehicle.source_count or 1) >= 3:
-        score += 12
+        components["multi_site"] = 12
         reasons.append("listed_on_many_marketplaces")
     elif (vehicle.source_count or 1) >= 2:
-        score += 6
+        components["multi_site"] = 6
 
     if dealer_similar_count >= 3:
-        score += 10
+        components["dealer_stock"] = 10
         reasons.append("dealer_has_similar_stock")
 
     now = datetime.now(timezone.utc)
     if now.day >= 25:
-        score += 5
+        components["timing"] = 5
         reasons.append("end_of_month_timing")
 
     # Language cues from notes / risk flags aren't always available; check risks for clearance phrasing via flags
     if vehicle.risk_flags and "price_reduced_language" in vehicle.risk_flags:
-        score += 8
+        components["language_cues"] = 8
+        reasons.append("price_reduced_language")
 
-    score = max(0.0, min(100.0, score))
+    score = max(0.0, min(100.0, round(sum(components.values()), 1)))
     if score >= 70:
         level = MotivationLevel.VERY_HIGH.value
     elif score >= 50:
@@ -221,11 +231,17 @@ def compute_motivation_score(
     else:
         level = MotivationLevel.LOW.value
 
-    breakdown = {
+    breakdown: dict[str, Any] = {
+        **{k: round(v, 1) for k, v in components.items()},
+        "total": score,
         "score": score,
         "level": level,
         "reasons": reasons,
         "estimate_only": True,
-        "note": "Dealer motivation is an estimate based on listing behaviour, not a confirmed willingness to negotiate.",
+        "inferred": True,
+        "note": (
+            "Dealer motivation is an estimate based on listing behaviour, "
+            "not a confirmed willingness to negotiate."
+        ),
     }
     return score, level, breakdown

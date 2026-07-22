@@ -153,6 +153,7 @@ table.listings th { color: var(--muted); font-weight: 500; font-size: 0.75rem; t
 .score-tip-float .score-break li strong { font-family: var(--mono); font-weight: 500; }
 .score-tip-float .score-break li[data-key="total"] strong { color: var(--accent-2); }
 .score-tip-float .score-break li[data-key="risk_penalty"] strong { color: var(--danger); }
+.score-tip-float.motivation .score-break li[data-key="total"] strong { color: var(--accent); }
 .score-tip-float .tip-note {
   display: block;
   margin-top: 0.55rem;
