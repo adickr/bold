@@ -169,11 +169,17 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     const first = linePts[0];
     const last = linePts[linePts.length - 1];
     const area = `${line} L${last[0].toFixed(1)} ${(top + innerH).toFixed(1)} L${first[0].toFixed(1)} ${(top + innerH).toFixed(1)} Z`;
-    const tip = last;
     const tipVal = values[values.length - 1];
-    const title = known.length >= 2
-      ? `${known[0].date} → ${known[known.length - 1].date}`
-      : `Today · ${tipVal} active`;
+    const thinHistory = known.length < 2;
+    const title = thinHistory
+      ? `Today · ${tipVal} active`
+      : `${known[0].date} → ${known[known.length - 1].date}`;
+
+    if (label) {
+      label.textContent = thinHistory
+        ? `Today · ${tipVal} active matches (trend builds daily)`
+        : (history && history.label) || "Active matches · last 30 days";
+    }
 
     chart.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(title)}">
       <path class="spark-area" d="${area}"></path>
