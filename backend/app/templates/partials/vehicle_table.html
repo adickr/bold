@@ -22,12 +22,6 @@
         <td>{{ v.year or '—' }}</td>
         <td>
           <a href="{{ v.detail_path }}"><strong>{{ v.variant or 'Fortuner' }}</strong>{% if v.is_stretch %} <em class="tag">stretch</em>{% endif %}</a>
-          <div class="row-actions">
-            <a href="{{ v.detail_path }}">Details</a>
-            {% if v.primary_source and v.primary_source.url %}
-              · <a href="{{ v.primary_source.url }}" target="_blank" rel="noopener noreferrer">{{ v.primary_source.label }}</a>
-            {% endif %}
-          </div>
         </td>
         <td>{{ v.price | zar }}</td>
         <td>{% if v.mileage %}{{ "{:,}".format(v.mileage) }} km{% else %}—{% endif %}</td>
@@ -44,11 +38,12 @@
         </td>
         <td>{{ v.motivation_level or '—' }}</td>
         <td class="links-cell">
-          <a class="btn-link" href="{{ v.detail_path }}">Agent detail</a>
           {% for s in v.sources if s.status in ['active', 'relisted'] %}
             {% if s.url %}
             <a class="btn-link external" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>
             {% endif %}
+          {% else %}
+            —
           {% endfor %}
         </td>
         <td>{{ v.shortlist_status or '—' }}</td>

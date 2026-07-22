@@ -415,9 +415,6 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
 
   function vehicleRowHtml(v, isNew) {
     const mileage = v.mileage != null ? `${Number(v.mileage).toLocaleString("en-ZA")} km` : "—";
-    const primary = v.primary_source && v.primary_source.url
-      ? ` · <a href="${escapeHtml(v.primary_source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(v.primary_source.label || "Source")}</a>`
-      : "";
     const sources = (v.sources || [])
       .filter((s) => s.status === "active" || s.status === "relisted")
       .filter((s) => s.url)
@@ -427,9 +424,6 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       <td>${escapeHtml(v.year || "—")}</td>
       <td>
         <a href="${escapeHtml(v.detail_path)}"><strong>${escapeHtml(v.variant || "Fortuner")}</strong>${v.is_stretch ? ' <em class="tag">stretch</em>' : ""}</a>
-        <div class="row-actions">
-          <a href="${escapeHtml(v.detail_path)}">Details</a>${primary}
-        </div>
       </td>
       <td>${zar(v.price)}</td>
       <td>${mileage}</td>
@@ -439,10 +433,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       <td>${v.total_reduction ? zar(v.total_reduction) : "—"}</td>
       <td>${scoreCellHtml(v)}</td>
       <td>${escapeHtml(v.motivation_level || "—")}</td>
-      <td class="links-cell">
-        <a class="btn-link" href="${escapeHtml(v.detail_path)}">Agent detail</a>
-        ${sources}
-      </td>
+      <td class="links-cell">${sources || "—"}</td>
       <td>${escapeHtml(v.shortlist_status || "—")}</td>
     </tr>`;
   }
