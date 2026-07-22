@@ -2,7 +2,6 @@
   <table class="listings">
     <thead>
       <tr>
-        <th></th>
         <th>Year</th>
         <th>Variant</th>
         <th>Price</th>
@@ -20,13 +19,6 @@
     <tbody data-live-tbody>
       {% for v in vehicles %}
       <tr data-vehicle-id="{{ v.id }}">
-        <td class="thumb">
-          {% if v.image %}
-            <a href="{{ v.detail_path }}">
-              <img src="{{ v.image }}" alt="" loading="lazy" referrerpolicy="no-referrer" />
-            </a>
-          {% else %}<span class="ph">—</span>{% endif %}
-        </td>
         <td>{{ v.year or '—' }}</td>
         <td>
           <a href="{{ v.detail_path }}"><strong>{{ v.variant or 'Fortuner' }}</strong>{% if v.is_stretch %} <em class="tag">stretch</em>{% endif %}</a>
@@ -49,7 +41,7 @@
           <a class="btn-link" href="{{ v.detail_path }}">Agent detail</a>
           {% for s in v.sources if s.status in ['active', 'relisted'] %}
             {% if s.url %}
-              <a class="btn-link external" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>
+            <a class="btn-link external" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>
             {% endif %}
           {% endfor %}
         </td>
@@ -57,7 +49,7 @@
       </tr>
 {% else %}
       <tr>
-        <td colspan="13">
+        <td colspan="12">
           <div class="empty-state">
             <p class="muted">No vehicles match the current filters.</p>
             {% if nationwide_count is defined and nationwide_count > 0 %}

@@ -33,20 +33,6 @@
       {% endif %}
     </div>
   </div>
-  <div class="detail-media">
-    {% if summary.image %}
-      <img src="{{ summary.image }}" alt="Listing photo" referrerpolicy="no-referrer" />
-    {% else %}
-      <div class="media-fallback">No image</div>
-    {% endif %}
-    {% if summary.images and summary.images|length > 1 %}
-    <div class="thumb-strip">
-      {% for img in summary.images[:6] %}
-        <img src="{{ img }}" alt="" loading="lazy" referrerpolicy="no-referrer" />
-      {% endfor %}
-    </div>
-    {% endif %}
-  </div>
 </section>
 
 <div class="detail-grid">

@@ -65,36 +65,40 @@
   <article data-spot="top_deal">
     <h2>Top deal</h2>
     {% if stats.top_deal %}
-      <a href="/vehicles/{{ stats.top_deal.id }}">
+      <a class="spot-card" href="{{ stats.top_deal.detail_path or ('/vehicles/' ~ stats.top_deal.id) }}">
         <p class="spot-title">{{ stats.top_deal.year }} {{ stats.top_deal.variant }}</p>
         <p class="spot-price">{{ stats.top_deal.price | zar }} · score {{ stats.top_deal.deal_score }}</p>
+        <span class="spot-cta">Open vehicle →</span>
       </a>
     {% else %}<p class="muted">No vehicles yet — run collectors.</p>{% endif %}
   </article>
   <article data-spot="best_grs">
     <h2>Best GR-S</h2>
     {% if stats.best_grs %}
-      <a href="/vehicles/{{ stats.best_grs.id }}">
+      <a class="spot-card" href="{{ stats.best_grs.detail_path or ('/vehicles/' ~ stats.best_grs.id) }}">
         <p class="spot-title">{{ stats.best_grs.year }} {{ stats.best_grs.variant }}</p>
         <p class="spot-price">{{ stats.best_grs.price | zar }}</p>
+        <span class="spot-cta">Open vehicle →</span>
       </a>
     {% else %}<p class="muted">None tracked</p>{% endif %}
   </article>
   <article data-spot="best_vx">
     <h2>Best VX</h2>
     {% if stats.best_vx %}
-      <a href="/vehicles/{{ stats.best_vx.id }}">
+      <a class="spot-card" href="{{ stats.best_vx.detail_path or ('/vehicles/' ~ stats.best_vx.id) }}">
         <p class="spot-title">{{ stats.best_vx.year }} {{ stats.best_vx.variant }}</p>
         <p class="spot-price">{{ stats.best_vx.price | zar }}</p>
+        <span class="spot-cta">Open vehicle →</span>
       </a>
     {% else %}<p class="muted">None tracked</p>{% endif %}
   </article>
   <article data-spot="most_motivated">
     <h2>Most motivated</h2>
     {% if stats.most_motivated %}
-      <a href="/vehicles/{{ stats.most_motivated.id }}">
+      <a class="spot-card" href="{{ stats.most_motivated.detail_path or ('/vehicles/' ~ stats.most_motivated.id) }}">
         <p class="spot-title">{{ stats.most_motivated.year }} {{ stats.most_motivated.variant }}</p>
         <p class="spot-price">{{ stats.most_motivated.motivation_level }} · {{ stats.most_motivated.price | zar }}</p>
+        <span class="spot-cta">Open vehicle →</span>
       </a>
     {% else %}<p class="muted">None tracked</p>{% endif %}
   </article>

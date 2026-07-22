@@ -98,9 +98,10 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
         : key === "most_motivated"
           ? `${escapeHtml(vehicle.motivation_level || "—")} · ${zar(vehicle.price)}`
           : zar(vehicle.price);
-    article.innerHTML = `${h2}<a href="/vehicles/${vehicle.id}">
+    article.innerHTML = `${h2}<a class="spot-card" href="${escapeHtml(vehicle.detail_path || `/vehicles/${vehicle.id}`)}">
       <p class="spot-title">${escapeHtml(vehicle.year || "")} ${escapeHtml(vehicle.variant || "Fortuner")}</p>
       <p class="spot-price">${priceLine}</p>
+      <span class="spot-cta">Open vehicle →</span>
     </a>`;
   }
 
@@ -132,11 +133,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       .filter((s) => s.url)
       .map((s) => `<a class="btn-link external" href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.label || s.source)}</a>`)
       .join("");
-    const img = v.image
-      ? `<a href="${escapeHtml(v.detail_path)}"><img src="${escapeHtml(v.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" /></a>`
-      : `<span class="ph">—</span>`;
     return `<tr data-vehicle-id="${escapeHtml(v.id)}" class="${isNew ? "is-new-listing" : ""}">
-      <td class="thumb">${img}</td>
       <td>${escapeHtml(v.year || "—")}</td>
       <td>
         <a href="${escapeHtml(v.detail_path)}"><strong>${escapeHtml(v.variant || "Fortuner")}</strong>${v.is_stretch ? ' <em class="tag">stretch</em>' : ""}</a>
@@ -174,7 +171,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       } else {
         extra = `<p class="muted">Keep scanning — results appear here as each source finishes.</p>`;
       }
-      tbody.innerHTML = `<tr><td colspan="13"><div class="empty-state"><p class="muted">No vehicles match the current filters yet.</p>${extra}</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state"><p class="muted">No vehicles match the current filters yet.</p>${extra}</div></td></tr>`;
       return;
     }
     const html = vehicles.map((v) => {
