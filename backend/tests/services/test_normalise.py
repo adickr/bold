@@ -29,3 +29,16 @@ def test_normalise_grs_aliases():
 def test_reject_4x2_detection():
     assert detect_drivetrain("2021 Fortuner 2.8 4x2 VX") == "4x2"
     assert detect_drivetrain("2.8 GD-6 4x4 VX") == "4x4"
+
+
+def test_raised_body_is_4x2_even_with_4x4_hint():
+    """Cars.co.za 'Raised Body' is the 4x2 trim — must not keep a search-scope 4x4 tag."""
+    assert detect_drivetrain("2017 Toyota Fortuner 2.4 GD-6 Raised Body Auto") == "4x2"
+    assert detect_drivetrain("…/2017-Toyota-Fortuner-2.4-GD-6-Raised-Body-Auto-…") == "4x2"
+    info = normalise_variant(
+        title="2017 Toyota Fortuner 2.4 GD-6 Raised Body Auto",
+        year=2017,
+        drivetrain_hint="4x4",
+    )
+    assert info.drivetrain == "4x2"
+    assert info.trim == "RB"

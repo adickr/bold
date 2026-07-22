@@ -54,7 +54,13 @@ def evaluate_listing(
 
     drivetrain = variant.drivetrain or listing.drivetrain
     path = (urlparse(listing.url or "").path or "").lower()
-    if re.search(r"(?:^|[-_/])4x2(?:[-_/]|$)", path):
+    title_blob = " ".join(
+        filter(None, [listing.title, listing.variant_raw, listing.description, path])
+    )
+    # Raised Body = Toyota's 4x2 line (often no "4x2" token in the SEO slug)
+    if re.search(r"raised[\s\-]*body", title_blob, re.I):
+        drivetrain = "4x2"
+    elif re.search(r"(?:^|[-_/])4x2(?:[-_/]|$)", path):
         drivetrain = "4x2"
     elif re.search(r"(?:^|[-_/])4x4(?:[-_/]|$)", path) and drivetrain != "4x2":
         drivetrain = drivetrain or "4x4"

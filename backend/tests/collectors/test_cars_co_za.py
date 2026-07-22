@@ -81,6 +81,27 @@ def test_cars_does_not_assume_4x4_when_slug_omits_axle():
     assert "drivetrain_unclear" in result.reasons
 
 
+def test_cars_raised_body_slug_is_4x2():
+    html = """
+    <div class="vehicle-card" data-vehicle-id="11123133">
+      <a href="/for-sale/used/2017-Toyota-Fortuner-2.4-GD-6-Raised-Body-Auto-Western-Cape-Tokai/11123133/">
+        <h2>2017 Toyota Fortuner 2.4 GD-6 Raised Body Auto</h2>
+      </a>
+      <span class="price">R 399 000</span>
+      <span>83 988 Km</span>
+    </div>
+    """
+    c = CarsCoZaCollector(settings=Settings(preferred_province="Western Cape"))
+    rows = c._annotate(c._valid_vehicle_listings(c.parse_search_html(html)))
+    assert len(rows) == 1
+    assert rows[0].drivetrain == "4x2"
+    from app.services.criteria import evaluate_listing
+
+    result = evaluate_listing(rows[0])
+    assert result.accepted is False
+    assert "4x2_excluded" in result.reasons
+
+
 def test_merge_page_results_dedupes_html_and_api():
     c = CarsCoZaCollector(settings=Settings(preferred_province="Western Cape"))
     html = """

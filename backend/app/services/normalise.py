@@ -57,6 +57,9 @@ def normalise_colour(colour: str | None) -> str | None:
 
 def detect_drivetrain(text: str) -> str | None:
     t = text.upper()
+    # Toyota "Raised Body" / RB trim is the 4x2 line (SEO: Raised-Body)
+    if re.search(r"RAISED[\s\-]*BODY", t):
+        return "4x2"
     has_4x2 = bool(re.search(r"\b4X2\b|\b2WD\b|\bRWD\b", t))
     has_4x4 = bool(re.search(r"\b4X4\b|\b4WD\b|\bAWD\b", t))
     if has_4x2 and not has_4x4:
@@ -118,7 +121,7 @@ def detect_trim(text: str) -> tuple[str | None, str | None]:
         trim = "Legend"
     elif re.search(r"\bEPIC\b", t):
         trim = "Epic"
-    elif re.search(r"\bRB\b", t):
+    elif re.search(r"\bRB\b|RAISED[\s\-]*BODY", t):
         trim = "RB"
     elif re.search(r"\bGD-?6\b", t):
         trim = "GD-6"
@@ -161,7 +164,12 @@ def normalise_variant(
     blob = " ".join(filter(None, [title, variant_raw, description]))
     engine = detect_engine(blob)
     transmission = transmission_hint or detect_transmission(blob) or "automatic"
-    drivetrain = drivetrain_hint or detect_drivetrain(blob)
+    detected_dt = detect_drivetrain(blob)
+    # Explicit 4x2 signals (Raised Body, 4x2) always beat a wrong 4x4 search-scope hint
+    if detected_dt == "4x2":
+        drivetrain = "4x2"
+    else:
+        drivetrain = drivetrain_hint or detected_dt
     fuel = fuel_hint or detect_fuel(blob) or ("diesel" if engine and "GD" in engine else None)
     trim, special = detect_trim(blob)
     generation = detect_generation(year, blob)

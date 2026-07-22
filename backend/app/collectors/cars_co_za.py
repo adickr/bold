@@ -312,6 +312,9 @@ class CarsCoZaCollector(BaseCollector):
         sometimes leak into axle-filtered results.
         """
         blob = " ".join(p for p in parts if p).lower().replace(" ", "")
+        # Toyota Raised Body = 4x2 (Tokai etc. slugs say Raised-Body, not 4x2)
+        if "raisedbody" in blob or "raised-body" in blob:
+            return "4x2"
         if re.search(r"(?:^|[-_/])4x2(?:[-_/]|$)", blob) or "4x2" in blob:
             return "4x2"
         if re.search(r"(?:^|[-_/])4x4(?:[-_/]|$)", blob) or "4x4" in blob or "4wd" in blob:
