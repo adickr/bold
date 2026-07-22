@@ -78,6 +78,8 @@ class Settings(BaseSettings):
     # Collector behaviour
     collector_mode: Literal["live", "fixture", "hybrid"] = "fixture"
     use_playwright: bool = True
+    playwright_headed: bool = False
+    playwright_user_data_dir: str | None = "./data/chrome-profile"
     request_delay_seconds: float = 2.5
     request_timeout_seconds: float = 45.0
     user_agent: str = (

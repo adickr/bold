@@ -54,6 +54,15 @@ def start_collect_job() -> dict[str, Any]:
         if _state["running"]:
             return dict(_state)
 
+    # Help Cars.co.za clear Cloudflare on a local Mac (persistent Chrome cookies)
+    settings = get_settings()
+    if settings.playwright_headed:
+        os.environ.setdefault("PLAYWRIGHT_HEADED", "true")
+    if settings.playwright_user_data_dir:
+        os.environ.setdefault(
+            "PLAYWRIGHT_USER_DATA_DIR", settings.playwright_user_data_dir
+        )
+
     sources = [c.source for c in all_collectors()]
     source_rows = [
         {"source": s, "label": _label(s), "status": "pending", "found": None, "error": None}

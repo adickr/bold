@@ -32,10 +32,13 @@ from app.schemas.listings import ListingPayload
 logger = logging.getLogger(__name__)
 
 DETAIL_HREF_RE = re.compile(
-    r"/for-sale/(?:used/)?[^\"'\s>]*/(?P<id>\d{5,})/?",
+    r"/for-sale/used/[^\"'\s>]*/(?P<id>\d{5,})/?",
     re.I,
 )
 RESULT_COUNT_RE = re.compile(r"(\d+)\s*-\s*(\d+)\s*of\s*(\d+)", re.I)
+NEWS_TITLE_RE = re.compile(
+    r"(?i)\b(spotted|buyer.?s guide|price & specs|vs\b|head-to-head|review|news)\b"
+)
 
 
 class CarsCoZaCollector(BaseCollector):
@@ -135,7 +138,10 @@ class CarsCoZaCollector(BaseCollector):
 
         if not all_listings:
             raise CollectorError(
-                "Cars.co.za: no listings parsed (often Cloudflare — try again or use a local browser)",
+                "Cars.co.za: no listings parsed — Cloudflare is blocking headless Chrome. "
+                "On your Mac restart with PLAYWRIGHT_HEADED=true and "
+                "PLAYWRIGHT_USER_DATA_DIR=./data/chrome-profile, click through the "
+                "Cloudflare check once, then re-collect.",
                 parser_broken=True,
             )
         return all_listings
@@ -160,8 +166,11 @@ class CarsCoZaCollector(BaseCollector):
                 )
                 for payload in payloads:
                     listings.extend(self.parse_api_json(payload))
+                listings = self._valid_vehicle_listings(listings)
                 if listings:
-                    self.snapshot_raw("search_api_intercept", {"n": len(payloads), "found": len(listings)})
+                    self.snapshot_raw(
+                        "search_api_intercept", {"n": len(payloads), "found": len(listings)}
+                    )
                     return self._annotate(listings), total
             except Exception:
                 logger.exception("Cars.co.za Playwright API intercept failed")
@@ -169,15 +178,15 @@ class CarsCoZaCollector(BaseCollector):
             try:
                 html = fetch_rendered_html(
                     url,
-                    wait_selector="a[href*='/for-sale/']",
+                    wait_selector="a[href*='/for-sale/used/']",
                     wait_through_challenge=True,
                     timeout_ms=120000,
                 )
                 self.snapshot_raw("search_rendered", html)
-                if "just a moment" in html.lower() and "/for-sale/" not in html.lower():
+                if "just a moment" in html.lower() and "/for-sale/used/" not in html.lower():
                     logger.warning("Cars.co.za still on Cloudflare challenge for %s", url)
                 else:
-                    listings = self.parse_search_html(html)
+                    listings = self._valid_vehicle_listings(self.parse_search_html(html))
                     total = self._parse_total(html)
             except Exception:
                 logger.exception("Cars.co.za Playwright HTML failed for %s", url)
@@ -189,12 +198,36 @@ class CarsCoZaCollector(BaseCollector):
                 if "just a moment" in html.lower() or "cf-turnstile" in html.lower():
                     logger.warning("Cars.co.za HTTP hit Cloudflare challenge for %s", url)
                 else:
-                    listings = self.parse_search_html(html)
+                    listings = self._valid_vehicle_listings(self.parse_search_html(html))
                     total = self._parse_total(html)
             except Exception:
                 logger.exception("Cars.co.za HTTP search failed for %s", url)
 
         return self._annotate(listings), total
+
+    def _valid_vehicle_listings(self, listings: list[ListingPayload]) -> list[ListingPayload]:
+        """Drop editorial/news hits and require a real used-car detail URL."""
+        out: list[ListingPayload] = []
+        seen: set[str] = set()
+        for item in listings:
+            href = (item.url or "").lower()
+            title = item.title or ""
+            if "/for-sale/used/" not in href and not DETAIL_HREF_RE.search(href):
+                # Allow API rows that only have an id — rebuild used URL later only if priced
+                if not (item.price_zar and item.source_listing_id):
+                    continue
+            if NEWS_TITLE_RE.search(title) and not item.price_zar:
+                continue
+            # Real stock almost always has a price or mileage on the card/API
+            if item.price_zar is None and item.mileage_km is None:
+                # URL-only slug with year+Fortuner is still ok (SSR sometimes omits text)
+                if not re.search(r"/20[0-2]\d-.*fortuner", href, re.I):
+                    continue
+            if item.source_listing_id in seen:
+                continue
+            seen.add(item.source_listing_id)
+            out.append(item)
+        return out
 
     def _annotate(self, listings: list[ListingPayload]) -> list[ListingPayload]:
         """Search is already 4x4 + area filtered — fill gaps on parsed rows."""
@@ -250,10 +283,14 @@ class CarsCoZaCollector(BaseCollector):
             if url and str(url).startswith("/"):
                 url = f"https://www.cars.co.za{url}"
             if not url:
-                url = f"https://www.cars.co.za/for-sale/{listing_id}"
+                url = f"https://www.cars.co.za/for-sale/used/toyota-fortuner/{listing_id}"
+            if "/for-sale/used/" not in str(url).lower():
+                continue
             price = row.get("price") or row.get("price_zar") or row.get("asking_price")
             mileage = row.get("mileage") or row.get("mileage_km") or row.get("odometer")
             year = row.get("year") or row.get("model_year")
+            if price in (None, "") and mileage in (None, ""):
+                continue
             location = (
                 row.get("location")
                 or row.get("area")
@@ -308,11 +345,15 @@ class CarsCoZaCollector(BaseCollector):
 
         cards = soup.select(
             ".vehicle-card, .result-item, article.listing, [data-vehicle-id], "
-            ".js-vehicle, .vehicle-list-item, li.vehicle, article"
+            ".js-vehicle, .vehicle-list-item, li.vehicle"
         )
         for card in cards:
             try:
-                link = card.select_one("a[href*='/for-sale/']") if hasattr(card, "select_one") else None
+                link = (
+                    card.select_one("a[href*='/for-sale/used/']")
+                    if hasattr(card, "select_one")
+                    else None
+                )
                 href = link["href"] if link and link.has_attr("href") else None
                 if not href:
                     continue
@@ -354,8 +395,8 @@ class CarsCoZaCollector(BaseCollector):
             except Exception:
                 logger.exception("Failed parsing Cars.co.za card")
 
-        # Fallback: every detail anchor on the page
-        for link in soup.select("a[href*='/for-sale/']"):
+        # Fallback: every used-car detail anchor on the page
+        for link in soup.select("a[href*='/for-sale/used/']"):
             href = link.get("href") or ""
             if href.startswith("/"):
                 href = f"https://www.cars.co.za{href}"
@@ -460,10 +501,31 @@ class CarsCoZaCollector(BaseCollector):
 
     @staticmethod
     def _mileage(text: str) -> int | None:
-        m = re.search(r"([\d\s,]+)\s*km", text, re.I)
-        return int(re.sub(r"[^\d]", "", m.group(1))) if m else None
+        for m in re.finditer(r"([\d\s,]+)\s*[Kk]m\b", text or ""):
+            digits = re.sub(r"[^\d]", "", m.group(1))
+            if not digits:
+                continue
+            val = int(digits)
+            # get_text often glues year+km → 202370098; peel a leading 20xx
+            if val > 500_000 and len(digits) >= 8 and digits[:2] in {"19", "20"}:
+                rest = int(digits[4:])
+                if 0 < rest <= 500_000:
+                    val = rest
+            if 0 < val <= 500_000:
+                return val
+        return None
 
     @staticmethod
     def _price(text: str) -> int | None:
-        m = re.search(r"R\s*([\d\s,]+)", text, re.I)
-        return int(re.sub(r"[^\d]", "", m.group(1))) if m else None
+        """Pick cash asking price; skip finance 'R x p/m' amounts."""
+        for m in re.finditer(r"R\s*([\d\s,]+)", text or "", re.I):
+            tail = (text or "")[m.end() : m.end() + 8].lower()
+            if "p/m" in tail or "/month" in tail:
+                continue
+            digits = re.sub(r"[^\d]", "", m.group(1))
+            if not digits:
+                continue
+            val = int(digits)
+            if 50_000 <= val <= 5_000_000:
+                return val
+        return None

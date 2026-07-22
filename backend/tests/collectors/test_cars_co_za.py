@@ -36,14 +36,17 @@ def test_parse_detail_anchors():
       <a href="/for-sale/used/2024-Toyota-Fortuner-2.8-GD-6-4x4-VX-Auto-Western-Cape-Bellville/10999001/">
         Toyota Fortuner 2.8
       </a>
+      <a href="/news/toyota-fortuner-spotted/338011/">Next-Generation Toyota Fortuner Spotted</a>
       <p>1 - 20 of 55</p>
     </body></html>
     """
     c = CarsCoZaCollector(settings=Settings(preferred_province="Western Cape"))
     rows = c.parse_search_html(html)
+    rows = c._valid_vehicle_listings(rows)
     ids = {r.source_listing_id for r in rows}
     assert "11014602" in ids
     assert "10999001" in ids
+    assert "338011" not in ids
     assert c._parse_total(html) == 55
     annotated = c._annotate(rows)
     assert all(r.drivetrain == "4x4" for r in annotated)

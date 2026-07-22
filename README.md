@@ -51,6 +51,10 @@ Open **http://127.0.0.1:8000/login** — default login `buyer` / `fortuner`.
 
 Sites are JS-heavy / bot-protected, so live mode uses Playwright (real Chromium).
 
+**Cars.co.za** sits behind Cloudflare Turnstile. Headless Chromium is often blocked.
+On your Mac, use a **persistent headed Chrome profile** so you can click through the
+check once; later collects reuse the cookies.
+
 ```bash
 cd ~/bold
 git pull origin cursor/fortuner-buying-agent-f5cc
@@ -58,24 +62,35 @@ cd backend
 source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
+# optional but recommended for Cars.co.za:
+#   brew install --cask google-chrome
 
-# one-shot live ingest (WeBuyCars works; others may still be blocked)
 export PYTHONPATH=.
 export COLLECTOR_MODE=live
 export USE_PLAYWRIGHT=true
 export ENABLE_SCHEDULER=false
-python scripts/collect_live.py
+export PLAYWRIGHT_HEADED=true
+export PLAYWRIGHT_USER_DATA_DIR=./data/chrome-profile
 
-# then restart the app
+# App UI (Collect button uses the same env)
+lsof -ti:8000 | xargs kill -9 2>/dev/null
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Or click **Collect live listings now** on the dashboard after restarting with the updated code.
+First Cars.co.za collect may open a Chrome window — complete the Cloudflare
+checkbox if shown, then leave it. AutoTrader / WeBuyCars do not need this.
+
+Or one-shot CLI:
+
+```bash
+python scripts/collect_live.py
+```
 
 Notes:
 - Keep volume low; this is a private tool
 - Listings outside 4x4 / ~110k km are filtered out (price is not a hard reject)
 - Asking prices only — not sold prices
+- If Cars.co.za still fails, AutoTrader + WeBuyCars still feed the dashboard
 
 
 ## Docker
