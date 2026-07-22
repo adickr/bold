@@ -171,8 +171,8 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       let extra = "";
       if (nationwideCount > 0) {
         extra = `<p>${nationwideCount} active nationwide — none match WC · 4x4 · ≤100k km yet.
-          <a class="btn-link" href="/listings?sort=price_asc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA</a>
-          · <a class="btn-link" href="/listings?sort=price_asc">Show everything</a></p>`;
+          <a class="btn-link" href="/listings?sort=deal_score_desc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA</a>
+          · <a class="btn-link" href="/listings?sort=deal_score_desc">Show everything</a></p>`;
       } else {
         extra = `<p class="muted">Keep scanning — results appear here as each source finishes.</p>`;
       }

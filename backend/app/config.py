@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     model: str = "Fortuner"
     required_drivetrain: str = "4x4"
     preferred_province: str = "Western Cape"
-    default_sort: str = "price_asc"  # price_asc | deal_score_desc
+    default_sort: str = "deal_score_desc"  # deal_score_desc | price_asc
     enforce_max_price: bool = False
     collector_max_pages: int = 15  # pages per source per collect run
     collector_results_per_page: int = 50

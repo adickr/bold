@@ -70,7 +70,7 @@ def page_live_snapshot(
     stats = dashboard_stats(db)
     matching = filter_vehicles(db, default_buyer_filters())
     nationwide = filter_vehicles(
-        db, VehicleFilterParams(active_only=True, sort="price_asc")
+        db, VehicleFilterParams(active_only=True, sort="deal_score_desc")
     )
     limit = max(1, min(limit, 60))
     return {
@@ -149,7 +149,7 @@ def page_dashboard(
     stats = dashboard_stats(db)
     vehicles = filter_vehicles(db, default_buyer_filters())[:8]
     nationwide = filter_vehicles(
-        db, VehicleFilterParams(active_only=True, sort="price_asc")
+        db, VehicleFilterParams(active_only=True, sort="deal_score_desc")
     )
     collect_status = get_collect_status()
     return templates.TemplateResponse(
@@ -209,12 +209,12 @@ def page_listings(
             new_only=new_only,
             shortlisted=shortlisted,
             stretch=stretch,
-            sort=sort or "price_asc",
+            sort=sort or "deal_score_desc",
             q=q or None,
         )
     vehicles = filter_vehicles(db, params)
     nationwide = filter_vehicles(
-        db, VehicleFilterParams(active_only=True, sort="price_asc")
+        db, VehicleFilterParams(active_only=True, sort="deal_score_desc")
     )
     return templates.TemplateResponse(
         request,

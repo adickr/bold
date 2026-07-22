@@ -32,10 +32,10 @@ def test_default_buyer_filters():
     assert params.max_mileage == 100_000
     assert params.drivetrain == "4x4"
     assert params.province == "Western Cape"
-    assert params.sort == "price_asc"
+    assert params.sort == "deal_score_desc"
 
 
-def test_api_vehicles_defaults_to_wc_4x4_price_asc(client, db_session, auth):
+def test_api_vehicles_defaults_to_wc_4x4_deal_score(client, db_session, auth):
     settings = get_settings()
     service = IngestionService(db_session, settings)
     for source in ("autotrader", "cars_co_za", "webuycars"):
@@ -52,8 +52,10 @@ def test_api_vehicles_defaults_to_wc_4x4_price_asc(client, db_session, auth):
         assert row["mileage"] is None or row["mileage"] <= 100_000
         loc = (row["location"] or "").lower()
         assert "western cape" in loc or "cape town" in loc or "stellenbosch" in loc or "brackenfell" in loc
-    prices = [r["price"] for r in rows if r["price"] is not None]
-    assert prices == sorted(prices)
+    # Deal score descending (None scores last)
+    scores = [r["deal_score"] for r in rows]
+    known = [s for s in scores if s is not None]
+    assert known == sorted(known, reverse=True)
 
     wide = client.get("/api/vehicles?apply_defaults=false", auth=auth)
     assert wide.status_code == 200

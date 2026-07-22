@@ -65,7 +65,7 @@ def api_vehicles(
     apply_defaults: bool = True,
     db: Session = Depends(get_db),
 ):
-    """List vehicles. By default applies buyer prefs (≤100k km, 4x4, Western Cape, price asc).
+    """List vehicles. By default applies buyer prefs (≤100k km, 4x4, Western Cape, deal score desc).
 
     Pass apply_defaults=false to browse without those constraints, or override any field.
     """
@@ -112,7 +112,7 @@ def api_vehicles(
             shortlisted=shortlisted,
             stretch=stretch,
             active_only=active_only,
-            sort=sort or "price_asc",
+            sort=sort or "deal_score_desc",
             q=q,
         )
     vehicles = filter_vehicles(db, params)

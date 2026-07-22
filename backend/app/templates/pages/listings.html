@@ -3,7 +3,7 @@
 {% block content %}
 <section class="section-head">
   <h1>Listings</h1>
-  <p class="lede">Default view: Western Cape · 4x4 · ≤100k km · lowest price first. No price cap — expensive finds still appear (sorted down the list) and can surface in dashboard spotlights.</p>
+  <p class="lede">Default view: Western Cape · 4x4 · ≤100k km · highest deal score first. No price cap — expensive finds still appear when the score warrants it, and can surface in dashboard spotlights.</p>
 </section>
 
 <form class="filters" method="get" action="/listings">
@@ -21,10 +21,10 @@
   </label>
   <label>Sort
     <select name="sort">
+      <option value="deal_score_desc" {% if filters.sort == 'deal_score_desc' %}selected{% endif %}>Deal score</option>
       <option value="price_asc" {% if filters.sort == 'price_asc' %}selected{% endif %}>Price ↑</option>
       <option value="price_desc" {% if filters.sort == 'price_desc' %}selected{% endif %}>Price ↓</option>
       <option value="mileage_asc" {% if filters.sort == 'mileage_asc' %}selected{% endif %}>Mileage ↑</option>
-      <option value="deal_score_desc" {% if filters.sort == 'deal_score_desc' %}selected{% endif %}>Deal score</option>
       <option value="year_desc" {% if filters.sort == 'year_desc' %}selected{% endif %}>Newest year</option>
     </select>
   </label>

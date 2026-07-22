@@ -99,7 +99,7 @@ class VehicleFilterParams(BaseModel):
     shortlisted: bool | None = None
     stretch: bool | None = None
     active_only: bool = True
-    sort: str = "price_asc"
+    sort: str = "deal_score_desc"
     q: str | None = None
 
 

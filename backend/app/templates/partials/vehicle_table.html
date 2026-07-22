@@ -55,8 +55,8 @@
             {% if nationwide_count is defined and nationwide_count > 0 %}
             <p>{{ nationwide_count }} active listing{{ 's' if nationwide_count != 1 else '' }} tracked nationwide — try clearing Province or open all SA.</p>
             <p>
-              <a class="btn-link" href="/listings?sort=price_asc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA · 4x4 · ≤100k km</a>
-              · <a class="btn-link" href="/listings?sort=price_asc">Show everything</a>
+              <a class="btn-link" href="/listings?sort=deal_score_desc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA · 4x4 · ≤100k km</a>
+              · <a class="btn-link" href="/listings?sort=deal_score_desc">Show everything</a>
               · <a class="btn-link" href="/listings">Reset WC defaults</a>
             </p>
             {% else %}

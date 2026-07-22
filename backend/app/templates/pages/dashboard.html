@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">South African used market</p>
     <h1>Toyota Fortuner 4x4 watch</h1>
-    <p class="lede">Cross-site history for Western Cape 4x4s under 100k km — cheapest first, with alerts when something exceptional shows up.</p>
+    <p class="lede">Cross-site history for Western Cape 4x4s under 100k km — best deal score first, with alerts when something exceptional shows up.</p>
     <form method="post" action="/collect" class="inline-form collect-form" style="margin-top:1rem" data-collect-form>
       <button type="submit" data-collect-btn {% if scanning %}disabled{% endif %}>
         {% if scanning %}Scanning…{% else %}Collect live listings now{% endif %}
@@ -48,7 +48,7 @@
       {% if nationwide_count is defined %}{{ nationwide_count }} active nationwide{% endif %}
       · {{ stats.active_matching }} match WC · 4x4 · ≤100k km.
       {% if stats.active_matching == 0 and nationwide_count %}
-        <a href="/listings?sort=price_asc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA</a> while WC stock catches up after re-collect.
+        <a href="/listings?sort=deal_score_desc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA</a> while WC stock catches up after re-collect.
       {% endif %}
     </p>
     {% endif %}
@@ -110,7 +110,7 @@
 
 <section data-live-listings>
   <div class="section-head">
-    <h2>Cheapest matching (WC · 4x4 · ≤100k km)</h2>
+    <h2>Best matching deals (WC · 4x4 · ≤100k km)</h2>
     <span class="muted tiny" data-live-count></span>
     <a class="text-link" href="/listings">View all</a>
   </div>
