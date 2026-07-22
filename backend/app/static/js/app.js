@@ -169,6 +169,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     const first = linePts[0];
     const last = linePts[linePts.length - 1];
     const area = `${line} L${last[0].toFixed(1)} ${(top + innerH).toFixed(1)} L${first[0].toFixed(1)} ${(top + innerH).toFixed(1)} Z`;
+    const tip = linePts[linePts.length - 1];
     const tipVal = values[values.length - 1];
     const thinHistory = known.length < 2;
     const title = thinHistory
@@ -964,5 +965,206 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     } finally {
       btn.disabled = false;
     }
+  });
+})();
+
+(function priceHistoryChart() {
+  const root = document.querySelector("[data-price-history]");
+  if (!root) return;
+  const mount = root.querySelector("[data-price-history-chart]");
+  const jsonEl = root.querySelector("[data-price-history-json]");
+  if (!mount || !jsonEl) return;
+
+  let events = [];
+  try {
+    events = JSON.parse(jsonEl.textContent || "[]");
+  } catch (_err) {
+    mount.innerHTML = `<p class="muted">Could not load price history chart.</p>`;
+    return;
+  }
+  if (!Array.isArray(events) || !events.length) {
+    mount.innerHTML = `<p class="muted">No price events yet.</p>`;
+    return;
+  }
+
+  function zar(value) {
+    if (value == null || value === "") return "—";
+    return `R${Number(value).toLocaleString("en-ZA")}`;
+  }
+
+  function zarShort(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "—";
+    if (n >= 1_000_000) {
+      const m = n / 1_000_000;
+      return `R${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}m`;
+    }
+    return `R${Math.round(n / 1000)}k`;
+  }
+
+  function formatWhen(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso || "");
+    return d.toLocaleString(undefined, {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  const escapeXml = (value) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  // Build step points: for changes, include old→new at the same timestamp
+  const points = [];
+  events
+    .slice()
+    .sort((a, b) => new Date(a.at) - new Date(b.at))
+    .forEach((e, idx) => {
+      const t = new Date(e.at).getTime();
+      if (!Number.isFinite(t) || e.new == null) return;
+      if (e.old != null && e.old !== e.new) {
+        points.push({
+          t: t - 1,
+          price: Number(e.old),
+          kind: "from",
+          event: e,
+          idx,
+        });
+      }
+      points.push({
+        t,
+        price: Number(e.new),
+        kind:
+          e.old == null
+            ? "initial"
+            : Number(e.change) < 0
+              ? "cut"
+              : Number(e.change) > 0
+                ? "hike"
+                : "flat",
+        event: e,
+        idx,
+      });
+    });
+
+  if (!points.length) {
+    mount.innerHTML = `<p class="muted">No chartable price points.</p>`;
+    return;
+  }
+
+  const prices = points.map((p) => p.price);
+  const minP = Math.min(...prices);
+  const maxP = Math.max(...prices);
+  const pad =
+    maxP === minP
+      ? Math.max(10_000, Math.round(maxP * 0.03))
+      : Math.round((maxP - minP) * 0.12) || 5000;
+  const lo = Math.max(0, minP - pad);
+  const hi = maxP + pad;
+
+  const times = points.map((p) => p.t);
+  let t0 = Math.min(...times);
+  let t1 = Math.max(...times);
+  if (t1 === t0) {
+    t0 -= 36e5;
+    t1 += 36e5;
+  }
+
+  const w = 640;
+  const h = 220;
+  const left = 52;
+  const right = 16;
+  const top = 18;
+  const bottom = 36;
+  const innerW = w - left - right;
+  const innerH = h - top - bottom;
+
+  function xy(t, price) {
+    const x = left + ((t - t0) / (t1 - t0)) * innerW;
+    const y = top + innerH - ((price - lo) / (hi - lo || 1)) * innerH;
+    return [x, y];
+  }
+
+  const coords = points.map((p) => {
+    const [x, y] = xy(p.t, p.price);
+    return { ...p, x, y };
+  });
+
+  let line = "";
+  coords.forEach((p, i) => {
+    if (i === 0) {
+      line += `M${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+      return;
+    }
+    line += ` H${p.x.toFixed(1)} V${p.y.toFixed(1)}`;
+  });
+
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  const area = `${line} V${(top + innerH).toFixed(1)} H${first.x.toFixed(1)} Z`;
+
+  const yTicks = 4;
+  const yTickEls = [];
+  for (let i = 0; i <= yTicks; i++) {
+    const price = lo + ((hi - lo) * i) / yTicks;
+    const y = top + innerH - (i / yTicks) * innerH;
+    yTickEls.push(`
+      <line class="ph-grid" x1="${left}" y1="${y.toFixed(1)}" x2="${w - right}" y2="${y.toFixed(1)}"></line>
+      <text class="ph-axis" x="${left - 8}" y="${(y + 3).toFixed(1)}" text-anchor="end">${zarShort(price)}</text>
+    `);
+  }
+
+  const labelIdxs = Array.from(
+    new Set([0, Math.floor((coords.length - 1) / 2), coords.length - 1])
+  );
+  const xLabels = labelIdxs
+    .map((i) => {
+      const p = coords[i];
+      return `<text class="ph-axis" x="${p.x.toFixed(1)}" y="${h - 10}" text-anchor="middle">${escapeXml(formatWhen(p.event.at))}</text>`;
+    })
+    .join("");
+
+  const markers = coords
+    .filter((p) => p.kind !== "from")
+    .map((p) => {
+      const e = p.event;
+      const tip =
+        p.kind === "initial"
+          ? `Initial ${zar(e.new)} · ${formatWhen(e.at)}`
+          : `${zar(e.old)} → ${zar(e.new)} (${zar(e.change)}) · ${formatWhen(e.at)}`;
+      return `<circle class="ph-dot is-${p.kind}" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4.2">
+        <title>${escapeXml(tip)}</title>
+      </circle>`;
+    })
+    .join("");
+
+  const delta = last.price - first.price;
+  const deltaCls = delta < 0 ? "is-cut" : delta > 0 ? "is-hike" : "";
+  const deltaLabel =
+    delta === 0 ? "No net change" : `${delta < 0 ? "" : "+"}${zar(delta)} vs first ask`;
+
+  mount.innerHTML = `
+    <div class="price-history-chart-head">
+      <span class="ph-now">${zar(last.price)}</span>
+      <span class="ph-delta ${deltaCls}">${deltaLabel}</span>
+    </div>
+    <svg class="price-history-svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="Asking price over time">
+      ${yTickEls.join("")}
+      <path class="ph-area" d="${area}"></path>
+      <path class="ph-line" d="${line}"></path>
+      ${markers}
+      ${xLabels}
+    </svg>
+  `;
+
+  root.querySelectorAll(".price-history-log time[datetime]").forEach((el) => {
+    const iso = el.getAttribute("datetime");
+    if (iso) el.textContent = formatWhen(iso);
   });
 })();

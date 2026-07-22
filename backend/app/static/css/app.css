@@ -441,6 +441,129 @@ tr.is-thumbs-up td:first-child {
 .source-list, .timeline, .score-break { list-style: none; padding: 0; margin: 0; }
 .source-list li, .timeline li { padding: 0.55rem 0; border-bottom: 1px solid var(--line); }
 .score-break li { display: flex; justify-content: space-between; padding: 0.35rem 0; border-bottom: 1px solid var(--line); }
+
+.price-history-panel {
+  grid-column: 1 / -1;
+}
+.price-history-chart {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.35rem 0 0.75rem;
+}
+.price-history-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.45rem 0.85rem;
+}
+.price-history-chart-head .ph-now {
+  font-family: var(--mono);
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.price-history-chart-head .ph-delta {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.price-history-chart-head .ph-delta.is-cut { color: var(--accent-2); }
+.price-history-chart-head .ph-delta.is-hike { color: var(--danger); }
+.price-history-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  min-height: 180px;
+  overflow: visible;
+}
+.price-history-svg .ph-grid {
+  stroke: rgba(155, 176, 163, 0.12);
+  stroke-width: 1;
+}
+.price-history-svg .ph-axis {
+  fill: var(--muted);
+  font-size: 10px;
+  font-family: var(--mono);
+}
+.price-history-svg .ph-area {
+  fill: rgba(126, 200, 163, 0.12);
+  stroke: none;
+}
+.price-history-svg .ph-line {
+  fill: none;
+  stroke: var(--accent-2);
+  stroke-width: 2.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.price-history-svg .ph-dot {
+  fill: var(--bg-2);
+  stroke: var(--accent-2);
+  stroke-width: 2;
+}
+.price-history-svg .ph-dot.is-initial {
+  stroke: var(--muted);
+  fill: var(--muted);
+}
+.price-history-svg .ph-dot.is-cut {
+  stroke: var(--accent-2);
+  fill: var(--accent-2);
+}
+.price-history-svg .ph-dot.is-hike {
+  stroke: var(--danger);
+  fill: var(--danger);
+}
+.price-history-svg .ph-dot.is-flat {
+  stroke: var(--accent);
+  fill: var(--accent);
+}
+.price-history-summary { margin: 0 0 0.65rem; }
+.price-history-log {
+  margin-top: 0.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 0.55rem;
+}
+.price-history-log summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.82rem;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.price-history-log summary::-webkit-details-marker { display: none; }
+.price-history-log summary::before {
+  content: "";
+  width: 0.35rem;
+  height: 0.35rem;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+.price-history-log[open] summary::before {
+  transform: rotate(45deg);
+}
+.price-history-log summary .mono {
+  color: var(--accent-2);
+  font-size: 0.78rem;
+}
+.price-history-log .timeline {
+  margin-top: 0.45rem;
+}
+.price-history-log .timeline time {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.15rem;
+}
+.price-history-log .timeline .change.is-cut { color: var(--accent-2); }
+.price-history-log .timeline .change.is-hike { color: var(--danger); }
+.price-history-log .timeline li {
+  display: grid;
+  gap: 0.15rem;
+}
 .risk { color: var(--danger); }
 .stack-form { display: grid; gap: 0.75rem; max-width: 520px; }
 .stack-form label { display: grid; gap: 0.3rem; font-size: 0.85rem; color: var(--muted); }

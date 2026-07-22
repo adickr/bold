@@ -60,25 +60,47 @@
     </ul>
   </section>
 
-  <section>
+  <section class="price-history-panel" data-price-history>
     <h2>Price history</h2>
-    <ol class="timeline">
-      {% for e in v.price_events|sort(attribute='observed_at') %}
-      <li>
-        <time>{{ e.observed_at }}</time>
-        {% if e.old_price_zar is not none %}
-          {{ e.old_price_zar | zar }} → {{ e.new_price_zar | zar }}
-          ({{ e.change_zar | zar }})
-        {% else %}
-          Initial {{ e.new_price_zar | zar }}
-        {% endif %}
-        <span class="muted">{{ e.source }} · {{ e.note }}</span>
-      </li>
-      {% else %}
-      <li class="muted">No price events yet.</li>
-      {% endfor %}
-    </ol>
+    {% set events = v.price_events|sort(attribute='observed_at') %}
+    {% if events %}
+    <div class="price-history-chart" data-price-history-chart></div>
+    <p class="muted tiny price-history-summary">
+      Original {{ v.original_price | zar }} · Lowest {{ v.lowest_observed_price | zar }} · Current {{ v.current_lowest_price | zar }}
+    </p>
+    <details class="price-history-log">
+      <summary>Event log <span class="mono">{{ events|length }}</span></summary>
+      <ol class="timeline">
+        {% for e in events %}
+        <li>
+          <time datetime="{{ e.observed_at }}">{{ e.observed_at }}</time>
+          {% if e.old_price_zar is not none %}
+            {{ e.old_price_zar | zar }} → {{ e.new_price_zar | zar }}
+            <span class="change {% if e.change_zar < 0 %}is-cut{% elif e.change_zar > 0 %}is-hike{% endif %}">({{ e.change_zar | zar }})</span>
+          {% else %}
+            Initial {{ e.new_price_zar | zar }}
+          {% endif %}
+          <span class="muted">{{ e.source }} · {{ e.note }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+    </details>
+    <script type="application/json" data-price-history-json>[
+      {%- for e in events %}
+      {
+        "at": {{ (e.observed_at.isoformat() if e.observed_at else none) | tojson }},
+        "old": {{ e.old_price_zar | tojson }},
+        "new": {{ e.new_price_zar | tojson }},
+        "change": {{ e.change_zar | tojson }},
+        "source": {{ e.source | tojson }},
+        "note": {{ e.note | tojson }}
+      }{% if not loop.last %},{% endif %}
+      {%- endfor %}
+    ]</script>
+    {% else %}
+    <p class="muted">No price events yet.</p>
     <p class="muted tiny">Original {{ v.original_price | zar }} · Lowest {{ v.lowest_observed_price | zar }} · Current {{ v.current_lowest_price | zar }}</p>
+    {% endif %}
   </section>
 
   <section>
