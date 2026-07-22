@@ -81,14 +81,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Open http://127.0.0.1:8000 (`buyer` / `fortuner`) → **Collect live listings now**.
 
 First Cars.co.za collect may open a Chrome window — complete the Cloudflare
-checkbox if shown. AutoTrader / WeBuyCars do not need this.
+checkbox **once** on the search results page. AutoTrader / WeBuyCars do not need this.
 
 Notes:
 - Keep volume low; this is a private tool
 - Listings outside 4x4 / ~110k km are filtered out (price is not a hard reject)
 - Asking prices only — not sold prices
 - Marketplace buttons only show for real scraped detail URLs (AutoTrader slugs are never invented — wrong slug → site error)
-- Cars.co.za opens **one** Chrome window for the whole scan — click Cloudflare at most once; cookies stay in `./data/chrome-profile`
+- Cars.co.za scrapes **search listing cards only** (never opens each car’s detail page). One Chrome window; Cloudflare at most once; cookies stay in `./data/chrome-profile`
 - If Cars.co.za still fails, AutoTrader + WeBuyCars still feed the dashboard
 
 

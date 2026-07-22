@@ -226,7 +226,7 @@ def goto_and_wait(
 ) -> str:
     """Navigate an existing page and return HTML (keeps CF cookies in-session)."""
     page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-    if wait_through_challenge:
+    if wait_through_challenge or is_cloudflare_challenge(page):
         _wait_through_challenge(page, timeout_ms=timeout_ms)
     try:
         page.wait_for_load_state("networkidle", timeout=min(timeout_ms, 30000))
@@ -237,8 +237,62 @@ def goto_and_wait(
             page.wait_for_selector(wait_selector, timeout=min(timeout_ms, 20000))
         except Exception:
             logger.debug("Timed out waiting for selector %s on %s", wait_selector, url)
-    page.wait_for_timeout(1200)
+    page.wait_for_timeout(800)
     return page.content()
+
+
+def soft_goto(
+    page: Any,
+    url: str,
+    *,
+    wait_selector: str | None = None,
+    timeout_ms: int = 60000,
+) -> str:
+    """Same-session navigation after CF is already cleared — only wait if challenged again."""
+    page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+    if is_cloudflare_challenge(page):
+        logger.warning("Cloudflare reappeared on soft navigation to %s", url)
+        _wait_through_challenge(page, timeout_ms=max(timeout_ms, 120000))
+    try:
+        page.wait_for_load_state("networkidle", timeout=min(timeout_ms, 20000))
+    except Exception:
+        logger.debug("networkidle timeout for soft goto %s", url)
+    if wait_selector and not is_cloudflare_challenge(page):
+        try:
+            page.wait_for_selector(wait_selector, timeout=min(timeout_ms, 15000))
+        except Exception:
+            logger.debug("Timed out waiting for selector %s on %s", wait_selector, url)
+    page.wait_for_timeout(600)
+    return page.content()
+
+
+def click_next_if_present(page: Any) -> bool:
+    """Advance search results via in-page Next control (avoids a full new-document CF)."""
+    for selector in (
+        "a[rel='next']",
+        "button[aria-label*='next' i]",
+        "a[aria-label*='next' i]",
+        "a:has-text('Next')",
+        "button:has-text('Next')",
+        ".pagination a:has-text('›')",
+        ".pagination a:has-text('>')",
+    ):
+        try:
+            loc = page.locator(selector).first
+            if not loc.count() or not loc.is_visible():
+                continue
+            loc.click(timeout=2500)
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=20000)
+            except Exception:
+                pass
+            page.wait_for_timeout(900)
+            if is_cloudflare_challenge(page):
+                _wait_through_challenge(page, timeout_ms=120000)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def fetch_rendered_html(

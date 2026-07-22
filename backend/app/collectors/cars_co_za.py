@@ -7,8 +7,13 @@ https://www.cars.co.za/usedcars/?make_model_variant=Toyota[Fortuner]
   &vfs_mileage=0-99999&vfs_area=Western%20Cape
   &vehicle_axle_config=4X4&P=1
 
+Scrapes **search listing cards only** (price, km, year, location, detail href).
+Never opens individual vehicle detail pages — that is unnecessary and multiplies
+Cloudflare challenges.
+
 Cars.co.za is often behind Cloudflare; Playwright (with challenge wait)
-is preferred when available.
+is preferred when available. Use one headed persistent Chrome session so the
+checkbox is needed at most once per collect.
 """
 
 from __future__ import annotations
@@ -24,9 +29,11 @@ from bs4 import BeautifulSoup
 from app.collectors.base import BaseCollector, CollectorError
 from app.collectors.browser import (
     browser_page,
+    click_next_if_present,
     goto_and_wait,
     is_cloudflare_challenge,
     playwright_available,
+    soft_goto,
 )
 from app.schemas.listings import ListingPayload
 
@@ -106,32 +113,61 @@ class CarsCoZaCollector(BaseCollector):
         return listings
 
     def _search_single_browser_session(self) -> list[ListingPayload]:
-        """One Chrome window for the whole scan — CF checkbox at most once."""
+        """One Chrome window; scrape search/listing cards only — never open detail pages.
+
+        Cloudflare should only need a checkbox on the first search URL. Later pages
+        soft-navigate or click Next in the same session.
+        """
         all_listings: list[ListingPayload] = []
         seen: set[str] = set()
-        max_pages = max(1, self.settings.collector_max_pages)
+        # Listing cards already have price/km/year/location — no need for 15 detail hops
+        max_pages = max(1, min(self.settings.collector_max_pages, 6))
         total_hint: int | None = None
-        url_builder = None
+        api_payloads: list[Any] = []
 
         with browser_page() as page:
-            # Warm the domain so Turnstile cookies attach before search URLs
-            logger.info("Cars.co.za: warming homepage in persistent Chrome…")
-            goto_and_wait(
-                page,
-                self.HOME_URL,
-                wait_through_challenge=True,
-                timeout_ms=180000,
-            )
 
-            for page_num in range(1, max_pages + 1):
-                urls = (
-                    [url_builder(page_num)]
-                    if url_builder is not None
-                    else self.search_urls(page_num)
+            def _on_response(response) -> None:  # type: ignore[no-untyped-def]
+                try:
+                    url = response.url or ""
+                    if response.status >= 400:
+                        return
+                    # Cars.co.za often hydrates results via JSON XHR
+                    if not any(
+                        x in url.lower()
+                        for x in ("/api/", "graphql", "search", "vehicle", "listing", "usedcars")
+                    ):
+                        return
+                    ctype = (response.headers.get("content-type") or "").lower()
+                    if "json" not in ctype and "javascript" not in ctype:
+                        return
+                    data = response.json()
+                    api_payloads.append(data)
+                except Exception:
+                    return
+
+            page.on("response", _on_response)
+
+            # Go straight to search — no homepage warm (that was a second CF prompt)
+            entry_urls = self.search_urls(1)
+            url_builder = None
+            html = ""
+            page_listings: list[ListingPayload] = []
+            cf_cleared = False
+            for idx, url in enumerate(entry_urls):
+                logger.info(
+                    "Cars.co.za: opening search listing page (%s/%s) — cards only, no detail clicks",
+                    idx + 1,
+                    len(entry_urls),
                 )
-                page_listings: list[ListingPayload] = []
-                page_total: int | None = None
-                for url in urls:
+                if cf_cleared:
+                    html = soft_goto(
+                        page,
+                        url,
+                        wait_selector="a[href*='/for-sale/used/']",
+                        timeout_ms=90000,
+                    )
+                else:
                     html = goto_and_wait(
                         page,
                         url,
@@ -139,36 +175,72 @@ class CarsCoZaCollector(BaseCollector):
                         wait_through_challenge=True,
                         timeout_ms=180000,
                     )
-                    if is_cloudflare_challenge(page):
-                        logger.warning("Cars.co.za still challenged after wait: %s", url)
-                        continue
-                    self.snapshot_raw(f"search_p{page_num}", html)
-                    page_listings = self._valid_vehicle_listings(self.parse_search_html(html))
-                    page_total = self._parse_total(html)
-                    if page_listings:
-                        if url_builder is None:
-                            if "Western-Cape/Toyota/Fortuner" in url:
-                                url_builder = lambda p: (
-                                    f"{self.SEARCH_PATH_WC}?"
-                                    f"{urlencode(self.build_search_params(p, path_mode=True))}"
-                                )
-                            else:
-                                url_builder = self.search_url
-                        break
+                if is_cloudflare_challenge(page):
+                    logger.warning("Cars.co.za still challenged after wait: %s", url)
+                    continue
+                cf_cleared = True
+                self.snapshot_raw("search_p1", html)
+                page_listings = self._merge_page_results(html, api_payloads)
+                if page_listings:
+                    if "Western-Cape/Toyota/Fortuner" in url:
+                        url_builder = lambda p: (
+                            f"{self.SEARCH_PATH_WC}?"
+                            f"{urlencode(self.build_search_params(p, path_mode=True))}"
+                        )
+                    else:
+                        url_builder = self.search_url
+                    break
+                logger.info("Cars.co.za entry URL returned 0 cards, trying alternate shape")
 
-                if total_hint is None and page_total is not None:
-                    total_hint = page_total
+            if not page_listings:
+                logger.info("Cars.co.za: no listing cards after entry URLs")
+                return []
+
+            total_hint = self._parse_total(html)
+            self._accumulate(all_listings, seen, page_listings)
+            logger.info(
+                "Cars.co.za page 1: parsed %s (unique %s, site_total=%s)",
+                len(page_listings),
+                len(all_listings),
+                total_hint,
+            )
+
+            for page_num in range(2, max_pages + 1):
+                if total_hint is not None and len(all_listings) >= total_hint:
+                    break
+                if len(page_listings) < 8:
+                    break
+
+                before_api = len(api_payloads)
+                advanced = click_next_if_present(page)
+                if advanced:
+                    html = page.content()
+                    logger.info("Cars.co.za: advanced via in-page Next → page %s", page_num)
+                elif url_builder is not None:
+                    html = soft_goto(
+                        page,
+                        url_builder(page_num),
+                        wait_selector="a[href*='/for-sale/used/']",
+                        timeout_ms=90000,
+                    )
+                    logger.info("Cars.co.za: soft-navigated to page %s", page_num)
+                else:
+                    break
+
+                if is_cloudflare_challenge(page):
+                    logger.warning("Cars.co.za challenged on page %s — stopping pagination", page_num)
+                    break
+
+                self.snapshot_raw(f"search_p{page_num}", html)
+                new_api = api_payloads[before_api:]
+                page_listings = self._merge_page_results(html, new_api or api_payloads)
                 if not page_listings:
                     logger.info("Cars.co.za page %s returned 0 — stopping", page_num)
                     break
 
-                gained = 0
-                for item in page_listings:
-                    if item.source_listing_id in seen:
-                        continue
-                    seen.add(item.source_listing_id)
-                    all_listings.append(item)
-                    gained += 1
+                if total_hint is None:
+                    total_hint = self._parse_total(html)
+                gained = self._accumulate(all_listings, seen, page_listings)
                 logger.info(
                     "Cars.co.za page %s: parsed %s (unique total %s, +%s, site_total=%s)",
                     page_num,
@@ -179,17 +251,40 @@ class CarsCoZaCollector(BaseCollector):
                 )
                 if gained == 0:
                     break
-                if total_hint is not None and len(all_listings) >= total_hint:
-                    break
-                if len(page_listings) < 8:
-                    break
 
         return self._annotate(all_listings)
+
+    def _merge_page_results(
+        self, html: str, api_payloads: list[Any] | None = None
+    ) -> list[ListingPayload]:
+        rows = list(self.parse_search_html(html))
+        for payload in api_payloads or []:
+            try:
+                rows.extend(self.parse_api_json(payload))
+                rows.extend(self.parse_api_json(self._find_list_in_obj(payload)))
+            except Exception:
+                logger.debug("Cars.co.za API payload parse skipped", exc_info=True)
+        return self._valid_vehicle_listings(rows)
+
+    @staticmethod
+    def _accumulate(
+        all_listings: list[ListingPayload],
+        seen: set[str],
+        page_listings: list[ListingPayload],
+    ) -> int:
+        gained = 0
+        for item in page_listings:
+            if item.source_listing_id in seen:
+                continue
+            seen.add(item.source_listing_id)
+            all_listings.append(item)
+            gained += 1
+        return gained
 
     def _search_http_only(self) -> list[ListingPayload]:
         all_listings: list[ListingPayload] = []
         seen: set[str] = set()
-        for page in range(1, max(1, self.settings.collector_max_pages) + 1):
+        for page in range(1, max(1, min(self.settings.collector_max_pages, 6)) + 1):
             found = False
             for url in self.search_urls(page):
                 try:
@@ -199,11 +294,7 @@ class CarsCoZaCollector(BaseCollector):
                         logger.warning("Cars.co.za HTTP hit Cloudflare for %s", url)
                         continue
                     rows = self._valid_vehicle_listings(self.parse_search_html(html))
-                    for item in rows:
-                        if item.source_listing_id in seen:
-                            continue
-                        seen.add(item.source_listing_id)
-                        all_listings.append(item)
+                    if self._accumulate(all_listings, seen, rows):
                         found = True
                     if rows:
                         break
@@ -525,6 +616,8 @@ class CarsCoZaCollector(BaseCollector):
 
     @staticmethod
     def _mileage(text: str) -> int | None:
+        """Extract odometer km from card text; avoid swallowing adjacent prices."""
+        candidates: list[int] = []
         for m in re.finditer(r"([\d\s,]+)\s*[Kk]m\b", text or ""):
             digits = re.sub(r"[^\d]", "", m.group(1))
             if not digits:
@@ -535,9 +628,16 @@ class CarsCoZaCollector(BaseCollector):
                 rest = int(digits[4:])
                 if 0 < rest <= 500_000:
                     val = rest
+            # Price + km glued: "61999541000 Km" → keep trailing odometer-sized chunk
+            if val > 500_000 and len(digits) >= 7:
+                for n in (6, 5, 4, 3):
+                    rest = int(digits[-n:])
+                    if 500 < rest <= 500_000:
+                        val = rest
+                        break
             if 0 < val <= 500_000:
-                return val
-        return None
+                candidates.append(val)
+        return candidates[-1] if candidates else None
 
     @staticmethod
     def _price(text: str) -> int | None:

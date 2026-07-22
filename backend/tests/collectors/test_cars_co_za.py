@@ -50,3 +50,32 @@ def test_parse_detail_anchors():
     assert c._parse_total(html) == 55
     annotated = c._annotate(rows)
     assert all(r.drivetrain == "4x4" for r in annotated)
+    # Listing-page scrape is enough: price + mileage present without opening detail
+    by_id = {r.source_listing_id: r for r in rows}
+    assert by_id["11014602"].price_zar == 619995
+    assert by_id["11014602"].mileage_km == 41000
+
+
+def test_merge_page_results_dedupes_html_and_api():
+    c = CarsCoZaCollector(settings=Settings(preferred_province="Western Cape"))
+    html = """
+    <a href="/for-sale/used/2024-Toyota-Fortuner-2.8-Western-Cape-Bellville/10999001/">
+      2024 Toyota Fortuner R 650 000 30 000 Km
+    </a>
+    """
+    api = {
+        "results": [
+            {
+                "id": "10999001",
+                "title": "2024 Toyota Fortuner 2.8 GD-6 4x4",
+                "url": "/for-sale/used/2024-Toyota-Fortuner/10999001/",
+                "price": 650000,
+                "mileage": 30000,
+                "year": 2024,
+                "model": "Fortuner",
+            }
+        ]
+    }
+    rows = c._merge_page_results(html, [api])
+    assert len([r for r in rows if r.source_listing_id == "10999001"]) == 1
+

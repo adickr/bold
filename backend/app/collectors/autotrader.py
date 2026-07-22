@@ -66,9 +66,14 @@ class AutoTraderCollector(BaseCollector):
     def search(self) -> list[ListingPayload]:
         all_listings: list[ListingPayload] = []
         max_pages = max(1, self.settings.collector_max_pages)
+        need_playwright = False
+
         for page in range(1, max_pages + 1):
             url = f"{self.search_base_url()}?{urlencode(self.build_search_params(page))}"
-            page_listings = self._search_one_page(url)
+            page_listings = self._search_one_page_http(url)
+            if not page_listings and page == 1:
+                need_playwright = True
+                break
             if not page_listings:
                 logger.info("AutoTrader page %s returned 0 listings — stopping", page)
                 break
@@ -83,35 +88,115 @@ class AutoTraderCollector(BaseCollector):
                 len(all_listings),
                 gained,
             )
-            if gained == 0:
+            if gained == 0 or len(page_listings) < 8:
                 break
-            # Typical page size ~20–50; stop early if clearly last page
-            if len(page_listings) < 8:
-                break
+
+        if need_playwright and playwright_available() and self.settings.use_playwright:
+            try:
+                all_listings = self._search_all_pages_playwright(max_pages)
+            except Exception:
+                logger.exception("AutoTrader Playwright search failed")
+
         listings = [x for x in all_listings if self.is_detail_url(x.url)]
         listings = self._annotate_search_scope(listings)
         if not listings:
             raise CollectorError("AutoTrader: no listings parsed", parser_broken=True)
         return listings
 
-    def _search_one_page(self, url: str) -> list[ListingPayload]:
-        listings: list[ListingPayload] = []
+    def _search_one_page_http(self, url: str) -> list[ListingPayload]:
         try:
             html = self.fetch_text(url)
             self.snapshot_raw("search", html)
-            listings = self.parse_all(html)
+            return [x for x in self.parse_all(html) if self.is_detail_url(x.url)]
         except Exception:
             logger.exception("AutoTrader HTTP search failed for %s", url)
+            return []
 
-        if (not listings) and playwright_available() and self.settings.use_playwright:
-            try:
-                listings = self.search_with_playwright(url)
-            except Exception:
-                logger.exception("AutoTrader Playwright search failed for %s", url)
+    def _search_all_pages_playwright(self, max_pages: int) -> list[ListingPayload]:
+        """One browser session for all AutoTrader search pages (cards only)."""
+        from app.collectors.browser import soft_goto
 
-        return [x for x in listings if self.is_detail_url(x.url)]
+        all_listings: list[ListingPayload] = []
+        with browser_page() as page:
+            for page_num in range(1, max_pages + 1):
+                url = f"{self.search_base_url()}?{urlencode(self.build_search_params(page_num))}"
+                if page_num == 1:
+                    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=45000)
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(2000)
+                else:
+                    soft_goto(page, url, timeout_ms=60000)
+                page.mouse.wheel(0, 3500)
+                page.wait_for_timeout(800)
+                html = page.content()
+                self.snapshot_raw(f"search_rendered_p{page_num}", html)
+                page_listings = self._listings_from_playwright_page(page, html)
+                if not page_listings:
+                    break
+                before = len(all_listings)
+                all_listings.extend(page_listings)
+                all_listings = self._dedupe(all_listings)
+                if len(all_listings) == before or len(page_listings) < 8:
+                    break
+        return all_listings
+
+    def _listings_from_playwright_page(self, page: Any, html: str) -> list[ListingPayload]:
+        listings = [x for x in self.parse_all(html) if self.is_detail_url(x.url)]
+        if listings:
+            return listings
+
+        rows = page.eval_on_selector_all(
+            "a[href*='/car-for-sale/']",
+            """els => els.map(a => {
+              const card = a.closest('article, li, div') || a.parentElement;
+              const text = card ? card.innerText : a.innerText;
+              const img = card ? card.querySelector('img') : null;
+              return {
+                href: a.href,
+                text: text || '',
+                img: img ? (img.currentSrc || img.src || img.getAttribute('data-src') || '') : ''
+              };
+            })""",
+        )
+        results: list[ListingPayload] = []
+        seen: set[str] = set()
+        for row in rows or []:
+            href = (row or {}).get("href") or ""
+            if not self.is_detail_url(href):
+                continue
+            listing_id = self.listing_id_from_url(href)
+            if not listing_id or listing_id in seen:
+                continue
+            seen.add(listing_id)
+            text = row.get("text") or ""
+            if "fortuner" not in text.lower() and "fortuner" not in href.lower():
+                continue
+            title = self._title_from_text(text) or f"Toyota Fortuner {listing_id}"
+            blob = f"{title} {text} {href}"
+            results.append(
+                ListingPayload(
+                    source=self.source,
+                    source_listing_id=listing_id,
+                    url=href.split("?")[0],
+                    title=title,
+                    variant_raw=self._title_from_text(text),
+                    price_zar=self._extract_price(text),
+                    mileage_km=self._extract_mileage(text),
+                    year=self._extract_year(text),
+                    dealer_location=self._location_from_text(text),
+                    drivetrain=detect_drivetrain(blob),
+                    image_urls=[row["img"]] if row.get("img") else [],
+                    make="Toyota",
+                    model="Fortuner",
+                )
+            )
+        return results
 
     def search_with_playwright(self, url: str) -> list[ListingPayload]:
+        """Legacy single-URL helper. Prefer _search_all_pages_playwright for collects."""
         with browser_page() as page:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             try:
@@ -123,57 +208,7 @@ class AutoTraderCollector(BaseCollector):
             page.wait_for_timeout(1500)
             html = page.content()
             self.snapshot_raw("search_rendered", html)
-            listings = self.parse_all(html)
-            if listings:
-                return listings
-
-            # Direct DOM extraction of detail anchors (most reliable)
-            rows = page.eval_on_selector_all(
-                "a[href*='/car-for-sale/']",
-                """els => els.map(a => {
-                  const card = a.closest('article, li, div') || a.parentElement;
-                  const text = card ? card.innerText : a.innerText;
-                  const img = card ? card.querySelector('img') : null;
-                  return {
-                    href: a.href,
-                    text: text || '',
-                    img: img ? (img.currentSrc || img.src || img.getAttribute('data-src') || '') : ''
-                  };
-                })""",
-            )
-            results: list[ListingPayload] = []
-            seen: set[str] = set()
-            for row in rows or []:
-                href = (row or {}).get("href") or ""
-                if not self.is_detail_url(href):
-                    continue
-                listing_id = self.listing_id_from_url(href)
-                if not listing_id or listing_id in seen:
-                    continue
-                seen.add(listing_id)
-                text = row.get("text") or ""
-                if "fortuner" not in text.lower() and "fortuner" not in href.lower():
-                    continue
-                title = self._title_from_text(text) or f"Toyota Fortuner {listing_id}"
-                blob = f"{title} {text} {href}"
-                results.append(
-                    ListingPayload(
-                        source=self.source,
-                        source_listing_id=listing_id,
-                        url=href.split("?")[0],
-                        title=title,
-                        variant_raw=self._title_from_text(text),
-                        price_zar=self._extract_price(text),
-                        mileage_km=self._extract_mileage(text),
-                        year=self._extract_year(text),
-                        dealer_location=self._location_from_text(text),
-                        drivetrain=detect_drivetrain(blob),
-                        image_urls=[row["img"]] if row.get("img") else [],
-                        make="Toyota",
-                        model="Fortuner",
-                    )
-                )
-            return results
+            return self._listings_from_playwright_page(page, html)
 
     def parse_all(self, html: str) -> list[ListingPayload]:
         listings = self.parse_search_html(html)
