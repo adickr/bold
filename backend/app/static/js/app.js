@@ -164,6 +164,8 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     const empty = root.querySelector("[data-fetch-empty]");
     let line = root.querySelector(".fetch-line:not([data-fetch-empty])");
     const highlights = root.querySelector("[data-fetch-highlights]");
+    const actions = root.querySelector(".fetch-actions");
+    const btn = root.querySelector("[data-what-changed-btn]");
     const dialog = document.querySelector("[data-changes-dialog]");
 
     if (!lastFetch || !lastFetch.last_fetch_at) {
@@ -181,6 +183,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
         highlights.innerHTML = "";
         highlights.hidden = true;
       }
+      if (actions) actions.hidden = true;
       renderChangesDialog(null);
       return;
     }
@@ -192,27 +195,19 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       line.innerHTML = `<span class="muted">Last fetch</span>
         <time class="mono" data-fetch-at></time>
         <span class="fetch-sep">·</span>
-        <span class="fetch-changes" data-fetch-changes></span>
-        <button type="button" class="btn-ghost" data-what-changed-btn>What changed</button>`;
+        <span class="fetch-changes" data-fetch-changes></span>`;
       root.prepend(line);
-      wireWhatChangedButton(line.querySelector("[data-what-changed-btn]"));
     }
     const timeEl = line.querySelector("[data-fetch-at]");
     const changesEl = line.querySelector("[data-fetch-changes]");
-    const btn = line.querySelector("[data-what-changed-btn]");
     if (timeEl) {
       timeEl.setAttribute("datetime", lastFetch.last_fetch_at);
       timeEl.textContent = formatFetchTime(lastFetch.last_fetch_at);
     }
     if (changesEl) {
-      changesEl.textContent = lastFetch.summary || (lastFetch.has_changes ? "Changes found" : "No listing changes in the last scan");
-      changesEl.classList.toggle("has-changes", !!lastFetch.has_changes);
-      changesEl.classList.toggle("no-changes", !lastFetch.has_changes);
-    }
-    if (btn) {
-      btn.hidden = false;
-      if (lastFetch.has_changes) btn.removeAttribute("data-quiet");
-      else btn.setAttribute("data-quiet", "");
+      changesEl.textContent = lastFetch.summary || "No new stock or price cuts";
+      changesEl.classList.toggle("has-changes", !!lastFetch.has_material);
+      changesEl.classList.toggle("no-changes", !lastFetch.has_material);
     }
     if (highlights) {
       const items = lastFetch.highlights || [];
@@ -222,13 +217,19 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       } else {
         highlights.hidden = false;
         highlights.innerHTML = items
-          .slice(0, 5)
+          .slice(0, 6)
           .map((h) => {
             const detail = h.detail ? ` <span class="mono">${escapeHtml(h.detail)}</span>` : "";
             return `<li data-kind="${escapeHtml(h.kind || "")}"><a href="${escapeHtml(h.href || "#")}">${escapeHtml(h.label || "Change")}${detail}</a></li>`;
           })
           .join("");
       }
+    }
+    if (actions) actions.hidden = false;
+    if (btn) {
+      btn.hidden = false;
+      btn.textContent = lastFetch.updates_label || "Show all updates";
+      wireWhatChangedButton(btn);
     }
     renderChangesDialog(lastFetch);
     if (dialog && dialog.open) {
@@ -254,7 +255,8 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
 
     const when = formatFetchTime(lastFetch.last_fetch_at);
     if (summaryEl) {
-      summaryEl.innerHTML = `${escapeHtml(lastFetch.summary || "")} · last fetch <time datetime="${escapeHtml(lastFetch.last_fetch_at)}">${escapeHtml(when)}</time>`;
+      const head = lastFetch.full_summary || lastFetch.summary || "";
+      summaryEl.innerHTML = `${escapeHtml(head)} · last fetch <time datetime="${escapeHtml(lastFetch.last_fetch_at)}">${escapeHtml(when)}</time>`;
     }
 
     const changes = lastFetch.changes || {};
@@ -271,8 +273,9 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       html += `<section><h3>New listings <span class="mono">${escapeHtml(lastFetch.new ?? newItems.length)}</span></h3><ul class="changes-list">`;
       html += newItems
         .map((item) => {
+          const scoreBit = item.deal_score != null ? `score ${escapeHtml(item.deal_score)} · ` : "";
           const metaBits = [fmtKm(item.mileage), item.location].filter(Boolean).join(" · ");
-          return `<li><a href="${escapeHtml(item.href || "#")}"><strong>${escapeHtml(item.title || "Fortuner")}</strong><span class="mono">${escapeHtml(item.price_label || "—")}</span>${metaBits ? `<span class="muted tiny">${escapeHtml(metaBits)}</span>` : ""}</a></li>`;
+          return `<li><a href="${escapeHtml(item.href || "#")}"><strong>${escapeHtml(item.title || "Fortuner")}</strong><span class="mono">${scoreBit}${escapeHtml(item.price_label || "—")}</span>${metaBits ? `<span class="muted tiny">${escapeHtml(metaBits)}</span>` : ""}</a></li>`;
         })
         .join("");
       html += `</ul></section>`;
@@ -295,7 +298,9 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       const countLabel = updatedTotal > updateItems.length
         ? `${updateItems.length}/${updatedTotal}`
         : String(updateItems.length);
-      html += `<section><h3>Updated listings <span class="mono">${escapeHtml(countLabel)}</span></h3><ul class="changes-list">`;
+      html += `<section><h3>Detail updates <span class="mono">${escapeHtml(countLabel)}</span></h3>`;
+      html += `<p class="muted tiny section-note">Mileage, dealer, title, and other field changes from the last scan.</p>`;
+      html += `<ul class="changes-list">`;
       html += updateItems
         .map((item) => {
           const detail = escapeHtml(item.change_summary || (item.details || []).join(" · ") || "Updated");
@@ -305,7 +310,8 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
         .join("");
       html += `</ul></section>`;
     } else if (Number(lastFetch.updated || 0) > 0) {
-      html += `<p class="muted">${Number(lastFetch.updated)} listing${Number(lastFetch.updated) === 1 ? "" : "s"} updated, but no field-level detail was stored for this scan.</p>`;
+      html += `<section><h3>Detail updates <span class="mono">${escapeHtml(lastFetch.updated)}</span></h3>`;
+      html += `<p class="muted">${Number(lastFetch.updated)} listing${Number(lastFetch.updated) === 1 ? "" : "s"} updated, but no field-level detail was stored for this scan.</p></section>`;
     }
     if (!html) {
       html = `<p class="muted" data-changes-empty>Changes were counted but no detail rows are available yet.</p>`;

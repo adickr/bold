@@ -422,19 +422,22 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
     )
 
     new_items, cut_items, update_items = _fetch_change_items(db, session_start)
-    # Compact chips for the dashboard strip
+    # Box strip: material changes only (new stock + price cuts)
     highlights: list[dict[str, Any]] = []
-    for item in new_items[:3]:
+    for item in new_items[:6]:
+        score = item.get("deal_score")
+        score_bit = f"score {score}" if score is not None else None
+        detail_bits = [b for b in (score_bit, item.get("price_label")) if b]
         highlights.append(
             {
                 "kind": "new",
                 "label": f"New · {item['title']}",
-                "detail": item.get("price_label"),
+                "detail": " · ".join(detail_bits) if detail_bits else None,
                 "href": item["href"],
             }
         )
     for item in cut_items:
-        if len(highlights) >= 6:
+        if len(highlights) >= 8:
             break
         highlights.append(
             {
@@ -444,22 +447,10 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
                 "href": item["href"],
             }
         )
-    for item in update_items:
-        if len(highlights) >= 6:
-            break
-        # Prefer non-cut updates in the chip strip (cuts already covered)
-        if item.get("fields") == ["price_zar"] and (item.get("change_zar") or 0) < 0:
-            continue
-        highlights.append(
-            {
-                "kind": "update",
-                "label": f"Updated · {item['title']}",
-                "detail": item.get("change_summary"),
-                "href": item["href"],
-            }
-        )
 
-    has_changes = bool(new_count or updated_count or price_cuts)
+    has_material = bool(new_items or cut_items or new_count or price_cuts)
+    has_updates = bool(update_items or updated_count)
+    has_changes = bool(has_material or has_updates)
     return {
         "last_fetch_at": last_at.isoformat(),
         "session_started_at": session_start.isoformat(),
@@ -470,13 +461,17 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
         "sources_ok": sources_ok,
         "sources_total": sources_total,
         "has_changes": has_changes,
+        "has_material": has_material,
+        "has_updates": has_updates,
         "highlights": highlights,
         "changes": {
             "new": new_items,
             "price_cuts": cut_items,
             "updates": update_items,
         },
-        "summary": _fetch_change_summary(new_count, updated_count, price_cuts, has_changes),
+        "summary": _fetch_material_summary(new_count, price_cuts),
+        "full_summary": _fetch_change_summary(new_count, updated_count, price_cuts, has_changes),
+        "updates_label": _updates_link_label(len(update_items), updated_count),
     }
 
 
@@ -579,6 +574,7 @@ def _fetch_change_items(
                 "title": _vehicle_change_title(v),
                 "price": v.current_lowest_price,
                 "price_label": _fmt_zar_spaces(v.current_lowest_price),
+                "deal_score": v.deal_score,
                 "mileage": v.current_mileage_km,
                 "location": v.primary_location,
                 "href": f"/vehicles/{v.id}",
@@ -686,6 +682,24 @@ def _fetch_change_items(
             break
 
     return new_items, cut_items, update_items
+
+
+def _fetch_material_summary(new: int, cuts: int) -> str:
+    if not new and not cuts:
+        return "No new stock or price cuts"
+    parts: list[str] = []
+    if new:
+        parts.append(f"{new} new")
+    if cuts:
+        parts.append(f"{cuts} price cut{'s' if cuts != 1 else ''}")
+    return " · ".join(parts)
+
+
+def _updates_link_label(shown: int, reported: int) -> str:
+    count = max(shown, reported)
+    if count <= 0:
+        return "Show all updates"
+    return f"Show all updates ({count})"
 
 
 def _fetch_change_summary(new: int, updated: int, cuts: int, has_changes: bool) -> str:

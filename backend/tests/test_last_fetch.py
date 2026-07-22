@@ -139,11 +139,18 @@ def test_last_fetch_summary_reports_changes(db_session):
     assert summary["updated"] == 3
     assert summary["price_cuts"] == 1
     assert summary["has_changes"] is True
+    assert summary["has_material"] is True
+    assert summary["has_updates"] is True
     assert "new" in summary["summary"]
+    assert "updated" not in summary["summary"]
+    assert "updated" in summary["full_summary"]
+    assert summary["updates_label"].startswith("Show all updates")
     assert summary["highlights"]
+    assert all(h["kind"] in {"new", "cut"} for h in summary["highlights"])
     assert summary["changes"]["new"]
     assert summary["changes"]["price_cuts"]
     assert summary["changes"]["new"][0]["href"].startswith("/vehicles/")
+    assert "deal_score" in summary["changes"]["new"][0]
     assert summary["changes"]["price_cuts"][0]["change_label"].startswith("−R")
     updates = summary["changes"]["updates"]
     assert updates

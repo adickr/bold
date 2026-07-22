@@ -20,16 +20,13 @@
         <span class="muted">Last fetch</span>
         <time class="mono" data-fetch-at datetime="{{ lf.last_fetch_at }}">{{ lf.last_fetch_at }}</time>
         <span class="fetch-sep">·</span>
-        <span class="fetch-changes {% if lf.has_changes %}has-changes{% else %}no-changes{% endif %}" data-fetch-changes>
+        <span class="fetch-changes {% if lf.has_material %}has-changes{% else %}no-changes{% endif %}" data-fetch-changes>
           {{ lf.summary }}
         </span>
-        <button type="button" class="btn-ghost" data-what-changed-btn {% if not lf.has_changes %}data-quiet{% endif %}>
-          What changed
-        </button>
       </p>
       {% if lf.highlights %}
       <ul class="fetch-highlights" data-fetch-highlights>
-        {% for h in lf.highlights[:5] %}
+        {% for h in lf.highlights[:6] %}
         <li data-kind="{{ h.kind }}">
           <a href="{{ h.href }}">{{ h.label }}{% if h.detail %} <span class="mono">{{ h.detail }}</span>{% endif %}</a>
         </li>
@@ -38,18 +35,26 @@
       {% else %}
       <ul class="fetch-highlights" data-fetch-highlights hidden></ul>
       {% endif %}
+      <p class="fetch-actions">
+        <button type="button" class="text-link-btn" data-what-changed-btn>
+          {{ lf.updates_label or 'Show all updates' }}
+        </button>
+      </p>
       {% else %}
       <p class="fetch-line muted" data-fetch-empty>No fetch yet — run <strong>Collect live listings now</strong>.</p>
       <ul class="fetch-highlights" data-fetch-highlights hidden></ul>
+      <p class="fetch-actions" hidden>
+        <button type="button" class="text-link-btn" data-what-changed-btn>Show all updates</button>
+      </p>
       {% endif %}
     </div>
 
     <dialog class="changes-dialog" data-changes-dialog>
       <form method="dialog" class="changes-dialog-head">
         <div>
-          <h2>What changed</h2>
+          <h2>All updates</h2>
           <p class="muted tiny" data-changes-summary>
-            {% if lf and lf.last_fetch_at %}{{ lf.summary }} · last fetch <time data-fetch-at datetime="{{ lf.last_fetch_at }}">{{ lf.last_fetch_at }}</time>{% else %}No fetch yet{% endif %}
+            {% if lf and lf.last_fetch_at %}{{ lf.full_summary or lf.summary }} · last fetch <time data-fetch-at datetime="{{ lf.last_fetch_at }}">{{ lf.last_fetch_at }}</time>{% else %}No fetch yet{% endif %}
           </p>
         </div>
         <button type="submit" class="btn-ghost" value="close" aria-label="Close">Close</button>
@@ -67,7 +72,7 @@
               <li>
                 <a href="{{ item.href }}">
                   <strong>{{ item.title }}</strong>
-                  <span class="mono">{{ item.price_label or '—' }}</span>
+                  <span class="mono">{% if item.deal_score is not none %}score {{ item.deal_score }} · {% endif %}{{ item.price_label or '—' }}</span>
                   {% if item.location or item.mileage %}
                   <span class="muted tiny">{% if item.mileage %}{{ '{:,}'.format(item.mileage).replace(',', ' ') }} km{% endif %}{% if item.mileage and item.location %} · {% endif %}{{ item.location or '' }}</span>
                   {% endif %}
@@ -97,7 +102,8 @@
           {% endif %}
           {% if update_items %}
           <section>
-            <h3>Updated listings <span class="mono">{{ update_items|length }}{% if lf.updated and lf.updated > (update_items|length) %}/{{ lf.updated }}{% endif %}</span></h3>
+            <h3>Detail updates <span class="mono">{{ update_items|length }}{% if lf.updated and lf.updated > (update_items|length) %}/{{ lf.updated }}{% endif %}</span></h3>
+            <p class="muted tiny section-note">Mileage, dealer, title, and other field changes from the last scan.</p>
             <ul class="changes-list">
               {% for item in update_items %}
               <li data-kind="update">
@@ -113,7 +119,10 @@
             </ul>
           </section>
           {% elif lf.updated %}
-          <p class="muted">{{ lf.updated }} listing{{ 's' if lf.updated != 1 else '' }} updated, but no field-level detail was stored for this scan.</p>
+          <section>
+            <h3>Detail updates <span class="mono">{{ lf.updated }}</span></h3>
+            <p class="muted">{{ lf.updated }} listing{{ 's' if lf.updated != 1 else '' }} updated, but no field-level detail was stored for this scan.</p>
+          </section>
           {% endif %}
         {% elif lf and lf.last_fetch_at %}
           <p class="muted" data-changes-empty>No listing changes in the last scan.</p>

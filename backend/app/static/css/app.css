@@ -378,12 +378,26 @@ tr.is-new-listing {
   background: rgba(196,163,90,0.12);
   border-color: rgba(196,163,90,0.35);
 }
-.fetch-highlights li[data-kind="update"] a {
-  background: rgba(155,176,163,0.10);
-  border-color: rgba(155,176,163,0.35);
-}
 .fetch-highlights li a:hover { filter: brightness(1.08); text-decoration: none; }
 .fetch-highlights .mono { color: var(--muted); font-size: 0.75rem; }
+.fetch-actions {
+  margin: 0.55rem 0 0;
+}
+.text-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-2);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.text-link-btn:hover { filter: brightness(1.1); color: var(--ink); }
+[data-what-changed-btn][hidden] { display: none; }
+.changes-dialog-body .section-note { margin: -0.25rem 0 0.55rem; }
 
 .btn-ghost {
   background: transparent;
