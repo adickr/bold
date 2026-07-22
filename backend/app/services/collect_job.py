@@ -56,12 +56,20 @@ def start_collect_job() -> dict[str, Any]:
 
     # Help Cars.co.za clear Cloudflare on a local Mac (persistent Chrome cookies)
     settings = get_settings()
-    if settings.playwright_headed:
-        os.environ.setdefault("PLAYWRIGHT_HEADED", "true")
-    if settings.playwright_user_data_dir:
-        os.environ.setdefault(
-            "PLAYWRIGHT_USER_DATA_DIR", settings.playwright_user_data_dir
-        )
+    if settings.playwright_headed or os.environ.get("PLAYWRIGHT_HEADED"):
+        os.environ["PLAYWRIGHT_HEADED"] = "true"
+    profile = (
+        os.environ.get("PLAYWRIGHT_USER_DATA_DIR")
+        or settings.playwright_user_data_dir
+        or "./data/chrome-profile"
+    )
+    # Absolute path so relative ./data/... is stable regardless of cwd
+    from pathlib import Path
+
+    abs_profile = str(Path(profile).expanduser().resolve())
+    Path(abs_profile).mkdir(parents=True, exist_ok=True)
+    os.environ["PLAYWRIGHT_USER_DATA_DIR"] = abs_profile
+    logger.info("Playwright profile: %s (headed=%s)", abs_profile, os.environ.get("PLAYWRIGHT_HEADED"))
 
     sources = [c.source for c in all_collectors()]
     source_rows = [

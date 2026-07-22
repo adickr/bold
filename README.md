@@ -88,6 +88,7 @@ Notes:
 - Listings outside 4x4 / ~110k km are filtered out (price is not a hard reject)
 - Asking prices only — not sold prices
 - Marketplace buttons only show when the URL is a real detail page (short `/car-for-sale/{id}` links are repaired or hidden)
+- Cars.co.za opens **one** Chrome window for the whole scan — click Cloudflare at most once; cookies stay in `./data/chrome-profile`
 - If Cars.co.za still fails, AutoTrader + WeBuyCars still feed the dashboard
 
 

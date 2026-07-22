@@ -23,8 +23,9 @@ from bs4 import BeautifulSoup
 
 from app.collectors.base import BaseCollector, CollectorError
 from app.collectors.browser import (
-    fetch_json_from_responses,
-    fetch_rendered_html,
+    browser_page,
+    goto_and_wait,
+    is_cloudflare_challenge,
     playwright_available,
 )
 from app.schemas.listings import ListingPayload
@@ -48,6 +49,7 @@ class CarsCoZaCollector(BaseCollector):
     SEARCH_URL = "https://www.cars.co.za/usedcars/"
     # Path-shaped SEO URL (often lighter CF / same results as query filters)
     SEARCH_PATH_WC = "https://www.cars.co.za/usedcars/Western-Cape/Toyota/Fortuner/"
+    HOME_URL = "https://www.cars.co.za/"
 
     def build_search_params(self, page: int = 1, *, path_mode: bool = False) -> dict[str, Any]:
         # Match the site's own filter query string (see user WC 4x4 ≤100k URL)
@@ -83,127 +85,133 @@ class CarsCoZaCollector(BaseCollector):
         return urls
 
     def search(self) -> list[ListingPayload]:
+        if playwright_available() and self.settings.use_playwright:
+            try:
+                listings = self._search_single_browser_session()
+                if listings:
+                    return listings
+            except Exception:
+                logger.exception("Cars.co.za single-session Playwright search failed")
+
+        # Last resort: plain HTTP (usually CF-blocked)
+        listings = self._search_http_only()
+        if not listings:
+            raise CollectorError(
+                "Cars.co.za: no listings parsed — Cloudflare is blocking. "
+                "Restart with PLAYWRIGHT_HEADED=true and "
+                "PLAYWRIGHT_USER_DATA_DIR=./data/chrome-profile, click the checkbox "
+                "ONCE in the Chrome window, leave that profile alone, then re-collect.",
+                parser_broken=True,
+            )
+        return listings
+
+    def _search_single_browser_session(self) -> list[ListingPayload]:
+        """One Chrome window for the whole scan — CF checkbox at most once."""
         all_listings: list[ListingPayload] = []
         seen: set[str] = set()
         max_pages = max(1, self.settings.collector_max_pages)
         total_hint: int | None = None
-        # Stick with whichever URL shape produced results on page 1
-        winning_url_builder = None
+        url_builder = None
 
-        for page in range(1, max_pages + 1):
-            page_listings: list[ListingPayload] = []
-            page_total: int | None = None
-            if winning_url_builder is not None:
-                page_listings, page_total = self._search_one_page(winning_url_builder(page))
-            else:
-                for url in self.search_urls(page):
-                    page_listings, page_total = self._search_one_page(url)
-                    if page_listings:
-                        # Freeze URL shape for subsequent pages
-                        if "Western-Cape/Toyota/Fortuner" in url:
-                            winning_url_builder = lambda p: (
-                                f"{self.SEARCH_PATH_WC}?"
-                                f"{urlencode(self.build_search_params(p, path_mode=True))}"
-                            )
-                        else:
-                            winning_url_builder = self.search_url
-                        break
-            if total_hint is None and page_total is not None:
-                total_hint = page_total
-            if not page_listings:
-                logger.info("Cars.co.za page %s returned 0 — stopping", page)
-                break
-            gained = 0
-            for item in page_listings:
-                if item.source_listing_id in seen:
-                    continue
-                seen.add(item.source_listing_id)
-                all_listings.append(item)
-                gained += 1
-            logger.info(
-                "Cars.co.za page %s: parsed %s (unique total %s, +%s, site_total=%s)",
+        with browser_page() as page:
+            # Warm the domain so Turnstile cookies attach before search URLs
+            logger.info("Cars.co.za: warming homepage in persistent Chrome…")
+            goto_and_wait(
                 page,
-                len(page_listings),
-                len(all_listings),
-                gained,
-                total_hint,
+                self.HOME_URL,
+                wait_through_challenge=True,
+                timeout_ms=180000,
             )
-            if gained == 0:
-                break
-            if total_hint is not None and len(all_listings) >= total_hint:
-                break
-            # Site shows ~20 per page; stop when a short page arrives
-            if len(page_listings) < 8:
-                break
 
-        if not all_listings:
-            raise CollectorError(
-                "Cars.co.za: no listings parsed — Cloudflare is blocking headless Chrome. "
-                "On your Mac restart with PLAYWRIGHT_HEADED=true and "
-                "PLAYWRIGHT_USER_DATA_DIR=./data/chrome-profile, click through the "
-                "Cloudflare check once, then re-collect.",
-                parser_broken=True,
-            )
-        return all_listings
-
-    def _search_one_page(self, url: str) -> tuple[list[ListingPayload], int | None]:
-        listings: list[ListingPayload] = []
-        total: int | None = None
-        html = ""
-
-        # Prefer Playwright — plain HTTP is usually Cloudflare-blocked
-        if playwright_available() and self.settings.use_playwright:
-            try:
-                # Capture any XHR/JSON the SPA fires after CF clears
-                payloads = fetch_json_from_responses(
-                    url,
-                    url_substring="cars.co.za",
-                    settle_ms=5000,
-                    scroll_rounds=3,
-                    wait_through_challenge=True,
-                    json_only=True,
-                    timeout_ms=120000,
+            for page_num in range(1, max_pages + 1):
+                urls = (
+                    [url_builder(page_num)]
+                    if url_builder is not None
+                    else self.search_urls(page_num)
                 )
-                for payload in payloads:
-                    listings.extend(self.parse_api_json(payload))
-                listings = self._valid_vehicle_listings(listings)
-                if listings:
-                    self.snapshot_raw(
-                        "search_api_intercept", {"n": len(payloads), "found": len(listings)}
+                page_listings: list[ListingPayload] = []
+                page_total: int | None = None
+                for url in urls:
+                    html = goto_and_wait(
+                        page,
+                        url,
+                        wait_selector="a[href*='/for-sale/used/']",
+                        wait_through_challenge=True,
+                        timeout_ms=180000,
                     )
-                    return self._annotate(listings), total
-            except Exception:
-                logger.exception("Cars.co.za Playwright API intercept failed")
+                    if is_cloudflare_challenge(page):
+                        logger.warning("Cars.co.za still challenged after wait: %s", url)
+                        continue
+                    self.snapshot_raw(f"search_p{page_num}", html)
+                    page_listings = self._valid_vehicle_listings(self.parse_search_html(html))
+                    page_total = self._parse_total(html)
+                    if page_listings:
+                        if url_builder is None:
+                            if "Western-Cape/Toyota/Fortuner" in url:
+                                url_builder = lambda p: (
+                                    f"{self.SEARCH_PATH_WC}?"
+                                    f"{urlencode(self.build_search_params(p, path_mode=True))}"
+                                )
+                            else:
+                                url_builder = self.search_url
+                        break
 
-            try:
-                html = fetch_rendered_html(
-                    url,
-                    wait_selector="a[href*='/for-sale/used/']",
-                    wait_through_challenge=True,
-                    timeout_ms=120000,
+                if total_hint is None and page_total is not None:
+                    total_hint = page_total
+                if not page_listings:
+                    logger.info("Cars.co.za page %s returned 0 — stopping", page_num)
+                    break
+
+                gained = 0
+                for item in page_listings:
+                    if item.source_listing_id in seen:
+                        continue
+                    seen.add(item.source_listing_id)
+                    all_listings.append(item)
+                    gained += 1
+                logger.info(
+                    "Cars.co.za page %s: parsed %s (unique total %s, +%s, site_total=%s)",
+                    page_num,
+                    len(page_listings),
+                    len(all_listings),
+                    gained,
+                    total_hint,
                 )
-                self.snapshot_raw("search_rendered", html)
-                if "just a moment" in html.lower() and "/for-sale/used/" not in html.lower():
-                    logger.warning("Cars.co.za still on Cloudflare challenge for %s", url)
-                else:
-                    listings = self._valid_vehicle_listings(self.parse_search_html(html))
-                    total = self._parse_total(html)
-            except Exception:
-                logger.exception("Cars.co.za Playwright HTML failed for %s", url)
+                if gained == 0:
+                    break
+                if total_hint is not None and len(all_listings) >= total_hint:
+                    break
+                if len(page_listings) < 8:
+                    break
 
-        if not listings:
-            try:
-                html = self.fetch_text(url)
-                self.snapshot_raw("search", html)
-                if "just a moment" in html.lower() or "cf-turnstile" in html.lower():
-                    logger.warning("Cars.co.za HTTP hit Cloudflare challenge for %s", url)
-                else:
-                    listings = self._valid_vehicle_listings(self.parse_search_html(html))
-                    total = self._parse_total(html)
-            except Exception:
-                logger.exception("Cars.co.za HTTP search failed for %s", url)
+        return self._annotate(all_listings)
 
-        return self._annotate(listings), total
+    def _search_http_only(self) -> list[ListingPayload]:
+        all_listings: list[ListingPayload] = []
+        seen: set[str] = set()
+        for page in range(1, max(1, self.settings.collector_max_pages) + 1):
+            found = False
+            for url in self.search_urls(page):
+                try:
+                    html = self.fetch_text(url)
+                    self.snapshot_raw("search_http", html)
+                    if "just a moment" in html.lower() or "cf-turnstile" in html.lower():
+                        logger.warning("Cars.co.za HTTP hit Cloudflare for %s", url)
+                        continue
+                    rows = self._valid_vehicle_listings(self.parse_search_html(html))
+                    for item in rows:
+                        if item.source_listing_id in seen:
+                            continue
+                        seen.add(item.source_listing_id)
+                        all_listings.append(item)
+                        found = True
+                    if rows:
+                        break
+                except Exception:
+                    logger.exception("Cars.co.za HTTP failed for %s", url)
+            if not found:
+                break
+        return self._annotate(all_listings)
 
     def _valid_vehicle_listings(self, listings: list[ListingPayload]) -> list[ListingPayload]:
         """Drop editorial/news hits and require a real used-car detail URL."""

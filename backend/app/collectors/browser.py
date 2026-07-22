@@ -8,8 +8,7 @@ For Cars.co.za on a local Mac, prefer:
   PLAYWRIGHT_HEADED=true
   PLAYWRIGHT_USER_DATA_DIR=./data/chrome-profile
 
-The first run may open a Chrome window so you can pass the Cloudflare check;
-later runs reuse the saved cookies.
+Use ONE browser session per source collect so Cloudflare is only cleared once.
 """
 
 from __future__ import annotations
@@ -40,18 +39,27 @@ def _user_data_dir() -> str | None:
     raw = (os.environ.get("PLAYWRIGHT_USER_DATA_DIR") or "").strip()
     if not raw:
         return None
-    path = Path(raw).expanduser()
+    path = Path(raw).expanduser().resolve()
     path.mkdir(parents=True, exist_ok=True)
     return str(path)
 
 
+def _storage_state_path() -> Path | None:
+    base = _user_data_dir()
+    if not base:
+        return None
+    return Path(base) / "cars-co-za-storage.json"
+
+
 @contextmanager
 def browser_page(*, headless: bool | None = None) -> Iterator[Any]:
+    """Yield a single Playwright page. Prefer persistent Chrome for CF cookies."""
     from playwright.sync_api import sync_playwright
 
     headed = _headed() if headless is None else (not headless)
     headless = not headed
     user_data = _user_data_dir()
+    storage_path = _storage_state_path()
 
     with sync_playwright() as p:
         context = None
@@ -63,18 +71,9 @@ def browser_page(*, headless: bool | None = None) -> Iterator[Any]:
                 "--disable-dev-shm-usage",
             ],
         }
-        context_kwargs: dict[str, Any] = {
-            "user_agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/126.0.0.0 Safari/537.36"
-            ),
-            "locale": "en-ZA",
-            "viewport": {"width": 1440, "height": 1100},
-            "timezone_id": "Africa/Johannesburg",
-        }
 
-        # Persistent Chrome profile keeps Cloudflare cookies between collects
+        # Persistent profile: do NOT override UA/viewport — keep a stable fingerprint
+        # so Cloudflare cookies from a prior checkbox stay valid.
         if user_data:
             for channel in ("chrome", "chromium", None):
                 try:
@@ -83,8 +82,9 @@ def browser_page(*, headless: bool | None = None) -> Iterator[Any]:
                         kwargs["channel"] = channel
                     context = p.chromium.launch_persistent_context(
                         user_data,
+                        locale="en-ZA",
+                        timezone_id="Africa/Johannesburg",
                         **kwargs,
-                        **context_kwargs,
                     )
                     logger.info(
                         "Playwright persistent context channel=%s headed=%s dir=%s",
@@ -102,8 +102,26 @@ def browser_page(*, headless: bool | None = None) -> Iterator[Any]:
             try:
                 yield page
             finally:
+                try:
+                    if storage_path is not None:
+                        context.storage_state(path=str(storage_path))
+                except Exception:
+                    logger.debug("Could not persist storage_state", exc_info=True)
                 context.close()
             return
+
+        context_kwargs: dict[str, Any] = {
+            "user_agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0.0.0 Safari/537.36"
+            ),
+            "locale": "en-ZA",
+            "viewport": {"width": 1440, "height": 1100},
+            "timezone_id": "Africa/Johannesburg",
+        }
+        if storage_path and storage_path.exists():
+            context_kwargs["storage_state"] = str(storage_path)
 
         for channel in ("chrome", None, "chromium"):
             try:
@@ -124,13 +142,52 @@ def browser_page(*, headless: bool | None = None) -> Iterator[Any]:
         try:
             yield page
         finally:
+            try:
+                if storage_path is not None:
+                    context.storage_state(path=str(storage_path))
+            except Exception:
+                logger.debug("Could not persist storage_state", exc_info=True)
             context.close()
             browser.close()
 
 
-def _wait_through_challenge(page: Any, timeout_ms: int = 120000) -> None:
-    """Wait until Cloudflare interstitial clears and used-listing markup appears."""
-    deadline_chunk = max(15000, min(timeout_ms, 90000))
+def is_cloudflare_challenge(page: Any) -> bool:
+    try:
+        title = (page.title() or "").lower()
+    except Exception:
+        title = ""
+    if "just a moment" in title or "attention required" in title:
+        return True
+    try:
+        return bool(page.query_selector("#challenge-running, #cf-challenge-running, .cf-turnstile"))
+    except Exception:
+        return False
+
+
+def _wait_through_challenge(page: Any, timeout_ms: int = 180000) -> None:
+    """Wait until Cloudflare clears. Fast-path when already cleared."""
+    if not is_cloudflare_challenge(page):
+        for selector in (
+            "a[href*='/for-sale/used/']",
+            "a[href*='/for-sale/']",
+            "a[href*='/car-for-sale/']",
+            "[data-vehicle-id]",
+        ):
+            try:
+                page.wait_for_selector(selector, timeout=min(12000, timeout_ms))
+                return
+            except Exception:
+                continue
+        return
+
+    headed = _headed()
+    if headed:
+        logger.warning(
+            "Cloudflare challenge detected — complete the checkbox in the Chrome window "
+            "(waiting up to %ss)…",
+            timeout_ms // 1000,
+        )
+
     try:
         page.wait_for_function(
             """() => {
@@ -139,13 +196,11 @@ def _wait_through_challenge(page: Any, timeout_ms: int = 120000) -> None:
               if (document.querySelector('#challenge-running, #cf-challenge-running')) return false;
               return true;
             }""",
-            timeout=deadline_chunk,
+            timeout=timeout_ms,
         )
     except Exception:
         logger.warning("Challenge title wait timed out (title=%s)", page.title())
 
-    # CF often clears a few seconds after the title changes — keep polling for inventory
-    listing_timeout = max(30000, timeout_ms - deadline_chunk)
     for selector in (
         "a[href*='/for-sale/used/']",
         "a[href*='/for-sale/']",
@@ -153,7 +208,7 @@ def _wait_through_challenge(page: Any, timeout_ms: int = 120000) -> None:
         "[data-vehicle-id]",
     ):
         try:
-            page.wait_for_selector(selector, timeout=listing_timeout)
+            page.wait_for_selector(selector, timeout=min(45000, timeout_ms))
             page.wait_for_timeout(1500)
             return
         except Exception:
@@ -161,38 +216,53 @@ def _wait_through_challenge(page: Any, timeout_ms: int = 120000) -> None:
     logger.warning("No listing selectors after challenge wait (title=%s)", page.title())
 
 
+def goto_and_wait(
+    page: Any,
+    url: str,
+    *,
+    wait_selector: str | None = None,
+    timeout_ms: int = 180000,
+    wait_through_challenge: bool = False,
+) -> str:
+    """Navigate an existing page and return HTML (keeps CF cookies in-session)."""
+    page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+    if wait_through_challenge:
+        _wait_through_challenge(page, timeout_ms=timeout_ms)
+    try:
+        page.wait_for_load_state("networkidle", timeout=min(timeout_ms, 30000))
+    except Exception:
+        logger.debug("networkidle timeout for %s", url)
+    if wait_selector and not is_cloudflare_challenge(page):
+        try:
+            page.wait_for_selector(wait_selector, timeout=min(timeout_ms, 20000))
+        except Exception:
+            logger.debug("Timed out waiting for selector %s on %s", wait_selector, url)
+    page.wait_for_timeout(1200)
+    return page.content()
+
+
 def fetch_rendered_html(
     url: str,
     *,
     wait_selector: str | None = None,
-    timeout_ms: int = 120000,
+    timeout_ms: int = 180000,
     wait_through_challenge: bool = False,
 ) -> str:
     with browser_page() as page:
-        page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-        if wait_through_challenge:
-            _wait_through_challenge(page, timeout_ms=timeout_ms)
-        try:
-            page.wait_for_load_state("networkidle", timeout=min(timeout_ms, 45000))
-        except Exception:
-            logger.warning("networkidle timeout for %s", url)
-        if wait_selector:
-            try:
-                page.wait_for_selector(wait_selector, timeout=min(timeout_ms, 45000))
-            except Exception:
-                logger.warning("Timed out waiting for selector %s on %s", wait_selector, url)
-        else:
-            page.wait_for_timeout(2000)
-        # Extra settle — Cars.co.za hydrates cards after CF clear
-        page.wait_for_timeout(2000)
-        return page.content()
+        return goto_and_wait(
+            page,
+            url,
+            wait_selector=wait_selector,
+            timeout_ms=timeout_ms,
+            wait_through_challenge=wait_through_challenge,
+        )
 
 
 def fetch_json_from_responses(
     url: str,
     *,
     url_substring: str,
-    timeout_ms: int = 120000,
+    timeout_ms: int = 180000,
     settle_ms: int = 3000,
     scroll_rounds: int = 8,
     wait_through_challenge: bool = False,
@@ -209,22 +279,18 @@ def fetch_json_from_responses(
                     return
                 if response.status >= 400:
                     return
-                ctype = (response.headers or {}).get("content-type", "")
-                if json_only and "json" not in ctype and "javascript" not in ctype:
-                    pass
                 data = response.json()
                 captured.append(data)
             except Exception:
                 return
 
         page.on("response", _on_response)
-        page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-        if wait_through_challenge:
-            _wait_through_challenge(page, timeout_ms=timeout_ms)
-        try:
-            page.wait_for_load_state("networkidle", timeout=min(timeout_ms, 45000))
-        except Exception:
-            logger.warning("networkidle timeout while capturing %s", url_substring)
+        goto_and_wait(
+            page,
+            url,
+            wait_through_challenge=wait_through_challenge,
+            timeout_ms=timeout_ms,
+        )
         page.wait_for_timeout(settle_ms)
 
         for _ in range(max(1, scroll_rounds)):
@@ -246,5 +312,5 @@ def fetch_json_from_responses(
                         break
                 except Exception:
                     continue
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(800)
     return captured
