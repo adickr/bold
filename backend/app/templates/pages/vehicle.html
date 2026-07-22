@@ -97,9 +97,9 @@
     <h2>Motivation estimate</h2>
     {% if v.motivation_breakdown %}
     <p><strong>{{ v.motivation_level }}</strong> ({{ v.motivation_score }})</p>
-    <ul>
-      {% for r in v.motivation_breakdown.reasons %}
-      <li>{{ r.replace('_', ' ') }}</li>
+    <ul class="score-break">
+      {% for k, val in v.motivation_breakdown.items() if k not in ['note', 'inferred', 'estimate_only', 'reasons', 'level', 'score'] %}
+      <li><span>{{ k.replace('_', ' ') }}</span><strong>{{ val }}</strong></li>
       {% endfor %}
     </ul>
     <p class="muted tiny">{{ v.motivation_breakdown.note }}</p>

@@ -36,3 +36,4 @@ def test_vehicle_to_dict_includes_deal_score_breakdown(db_session):
     assert data["deal_score_breakdown"]["price_value"] is not None
     assert data["deal_score_breakdown"]["total"] == score
     assert "completeness" in data["deal_score_breakdown"]
+
