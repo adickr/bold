@@ -582,11 +582,12 @@ class AutoTraderCollector(BaseCollector):
         return self._annotate_search_scope(self.parse_search_html(html))
 
     def _annotate_search_scope(self, listings: list[ListingPayload]) -> list[ListingPayload]:
-        """Keep only cards with an explicit 4x4 signal in URL or title/variant.
+        """Keep only cards whose SEO URL contains 4x4.
 
-        Do NOT assume ``transmissiondrive=4x4`` search scope is perfect — AT
-        SEO slugs like ``/2.8gd-6/28658500`` (no 4x4) can be 4x2 VX stock that
-        still leaked through or was saved from an older broader scrape.
+        AutoTrader 4x4 stock uses slugs like ``.../2.8gd-6-4x4-vx/{id}``.
+        Slugs that omit axle (``.../2.8gd-6/28658500``) are not reliable 4x4 —
+        title/variant text is often contaminated by the ``transmissiondrive=4x4``
+        filter chip, so we do **not** trust text alone.
         """
         preferred = (self.settings.preferred_province or "").strip()
         is_wc = preferred.lower() in {"western cape", "wc", "western-cape"}
@@ -596,17 +597,13 @@ class AutoTraderCollector(BaseCollector):
         for item in listings:
             data = item.model_dump()
             url_dt = self.drivetrain_from_url(data.get("url"))
-            compact = " ".join(
-                filter(None, [data.get("title"), data.get("variant_raw")])
-            )
-            text_dt = detect_drivetrain(compact) if compact else None
-            if url_dt == "4x2" or text_dt == "4x2":
-                dropped += 1
-                continue
-            if url_dt != "4x4" and text_dt != "4x4":
+            if url_dt != "4x4":
                 dropped += 1
                 continue
             data["drivetrain"] = "4x4"
+            compact = " ".join(
+                filter(None, [data.get("title"), data.get("variant_raw")])
+            )
             if self._is_chip_title(data.get("title")):
                 data["title"] = self._resolve_title(data.get("title"), data.get("url"), compact)
                 data["variant_raw"] = data.get("variant_raw") or data["title"]
@@ -618,7 +615,7 @@ class AutoTraderCollector(BaseCollector):
                     data["dealer_location"] = f"{loc}, {preferred}"
             out.append(ListingPayload.model_validate(data))
         if dropped:
-            logger.info("AutoTrader: dropped %s card(s) without explicit 4x4", dropped)
+            logger.info("AutoTrader: dropped %s card(s) without 4x4 in URL", dropped)
         return [x for x in out if self._is_plausible_card(x)]
 
     def _is_wc_search(self) -> bool:
@@ -719,6 +716,9 @@ class AutoTraderCollector(BaseCollector):
         if not cls.is_detail_url(url):
             return False
         if "fortuner" not in blob.lower():
+            return False
+        # Hard gate: SEO slug must contain 4x4 (never trust chip-contaminated titles)
+        if cls.drivetrain_from_url(url) != "4x4":
             return False
         if cls.drivetrain_from_url(url) == "4x2":
             return False

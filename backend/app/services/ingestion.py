@@ -343,18 +343,10 @@ class IngestionService:
             )
         elif listing.source == "autotrader":
             from app.collectors.autotrader import AutoTraderCollector
-            from app.services.normalise import detect_drivetrain
 
+            # URL must contain 4x4 — ignore stale title/DB drivetrain tags
             url_dt = AutoTraderCollector.drivetrain_from_url(listing.url)
-            text_dt = detect_drivetrain(
-                " ".join(filter(None, [listing.title, listing.variant_raw]))
-            )
-            if url_dt == "4x2" or text_dt == "4x2":
-                drivetrain = "4x2"
-            elif url_dt == "4x4" or text_dt == "4x4":
-                drivetrain = "4x4"
-            else:
-                drivetrain = None  # stale search-scope 4x4 tag — reject
+            drivetrain = url_dt  # None / 4x2 → criteria rejects
         return ListingPayload(
             source=listing.source,
             source_listing_id=listing.source_listing_id,
