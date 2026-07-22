@@ -126,6 +126,53 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     renderSpot("best_grs", stats.best_grs, "Best GR-S");
     renderSpot("best_vx", stats.best_vx, "Best VX");
     renderSpot("most_motivated", stats.most_motivated, "Most motivated");
+    renderPriceDistribution(stats.price_distribution || [], stats.median_asking_price);
+  }
+
+  function renderPriceDistribution(buckets, medianPrice) {
+    const section = document.querySelector("[data-price-dist]");
+    if (!section) return;
+    const headMeta = section.querySelector(".section-head .mono, .section-head [data-price-median]");
+    if (headMeta && medianPrice != null) {
+      headMeta.textContent = `Median ${zar(medianPrice)}`;
+    }
+    let chart = section.querySelector("[data-price-chart]");
+    const empty = section.querySelector("[data-price-empty]");
+    if (!buckets.length) {
+      if (chart) chart.remove();
+      if (empty) {
+        empty.hidden = false;
+      } else {
+        const p = document.createElement("p");
+        p.className = "muted";
+        p.dataset.priceEmpty = "1";
+        p.textContent = "No priced matches yet — run a collect to fill the chart.";
+        section.appendChild(p);
+      }
+      return;
+    }
+    if (empty) empty.remove();
+    const maxCount = Math.max(1, ...buckets.map((b) => Number(b.count) || 0));
+    if (!chart) {
+      chart = document.createElement("div");
+      chart.className = "price-chart";
+      chart.dataset.priceChart = "1";
+      section.appendChild(chart);
+    }
+    chart.style.setProperty("--max-count", String(maxCount));
+    chart.innerHTML = buckets
+      .map((b) => {
+        const count = Number(b.count) || 0;
+        const label = escapeHtml(b.label || "");
+        const emptyCls = count === 0 ? " is-empty" : "";
+        const n = count ? String(count) : "";
+        return `<div class="price-bar${emptyCls}" style="--n: ${count}" title="${count} car${count === 1 ? "" : "s"} · ${label}">
+          <span class="n">${n}</span>
+          <span class="bar" aria-hidden="true"></span>
+          <span class="lbl">${label}</span>
+        </div>`;
+      })
+      .join("");
   }
 
   function vehicleRowHtml(v, isNew) {

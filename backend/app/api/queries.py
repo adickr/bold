@@ -363,6 +363,45 @@ def filter_vehicles(db: Session, params: VehicleFilterParams) -> list[CanonicalV
     return sort_vehicles(vehicles, params.sort)
 
 
+def build_price_distribution(
+    prices: list[int], *, bucket_zar: int = 50_000
+) -> list[dict[str, Any]]:
+    """Histogram buckets for asking prices (inclusive low, exclusive high)."""
+    clean = sorted(p for p in prices if p is not None and p > 0)
+    if not clean:
+        return []
+    size = max(10_000, int(bucket_zar))
+    lo = (clean[0] // size) * size
+    hi = ((clean[-1] // size) + 1) * size
+    buckets: list[dict[str, Any]] = []
+    for start in range(lo, hi, size):
+        end = start + size
+        count = sum(1 for p in clean if start <= p < end)
+        buckets.append(
+            {
+                "min_price": start,
+                "max_price": end,
+                "count": count,
+                "label": _price_bucket_label(start, end),
+            }
+        )
+    while buckets and buckets[0]["count"] == 0:
+        buckets.pop(0)
+    while buckets and buckets[-1]["count"] == 0:
+        buckets.pop()
+    return buckets
+
+
+def _price_bucket_label(start: int, end: int) -> str:
+    def fmt(n: int) -> str:
+        if n >= 1_000_000:
+            val = n / 1_000_000
+            return f"R{val:.1f}m".replace(".0m", "m")
+        return f"R{n // 1000}k"
+
+    return f"{fmt(start)}–{fmt(end)}"
+
+
 def dashboard_stats(db: Session) -> DashboardStats:
     """Spotlights can surface exceptional cars nationwide; counts use buyer defaults."""
     now = datetime.now(timezone.utc)
@@ -434,6 +473,7 @@ def dashboard_stats(db: Session) -> DashboardStats:
         new_today=new_today,
         reductions_this_week=len(reductions),
         median_asking_price=int(median(prices)) if prices else None,
+        price_distribution=build_price_distribution(prices),
         top_deal=top_deal,
         best_grs=best_grs,
         best_vx=best_vx,

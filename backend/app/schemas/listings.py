@@ -108,6 +108,7 @@ class DashboardStats(BaseModel):
     new_today: int
     reductions_this_week: int
     median_asking_price: int | None
+    price_distribution: list[dict[str, Any]] = Field(default_factory=list)
     top_deal: dict[str, Any] | None
     best_grs: dict[str, Any] | None
     best_vx: dict[str, Any] | None

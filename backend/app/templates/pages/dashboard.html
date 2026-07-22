@@ -108,6 +108,34 @@
   </article>
 </section>
 
+<section class="price-dist" data-price-dist>
+  <div class="section-head">
+    <div>
+      <h2>Asking price distribution</h2>
+      <p class="muted tiny">WC · 4x4 · ≤100k km — how many cars sit in each R50k band</p>
+    </div>
+    {% if stats.median_asking_price %}
+    <span class="muted tiny mono" data-price-median>Median {{ stats.median_asking_price | zar }}</span>
+    {% endif %}
+  </div>
+  {% if stats.price_distribution %}
+  {% set max_count = (stats.price_distribution | map(attribute='count') | max) or 1 %}
+  <div class="price-chart" data-price-chart style="--max-count: {{ max_count }}">
+    {% for b in stats.price_distribution %}
+    <div class="price-bar {% if b.count == 0 %}is-empty{% endif %}"
+         style="--n: {{ b.count }}"
+         title="{{ b.count }} car{{ 's' if b.count != 1 else '' }} · {{ b.label }}">
+      <span class="n">{% if b.count %}{{ b.count }}{% endif %}</span>
+      <span class="bar" aria-hidden="true"></span>
+      <span class="lbl">{{ b.label }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted" data-price-empty>No priced matches yet — run a collect to fill the chart.</p>
+  {% endif %}
+</section>
+
 <section data-live-listings>
   <div class="section-head">
     <h2>Best matching deals (WC · 4x4 · ≤100k km)</h2>
