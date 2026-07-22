@@ -275,7 +275,7 @@ class CarsCoZaCollector(BaseCollector):
     def _valid_vehicle_listings(self, listings: list[ListingPayload]) -> list[ListingPayload]:
         """Drop editorial/news hits and require a real used-car detail URL."""
         out: list[ListingPayload] = []
-        seen: set[str] = set()
+        by_id: dict[str, ListingPayload] = {}
         for item in listings:
             href = (item.url or "").lower()
             title = item.title or ""
@@ -290,11 +290,37 @@ class CarsCoZaCollector(BaseCollector):
                 # URL-only slug with year+Fortuner is still ok (SSR sometimes omits text)
                 if not re.search(r"/20[0-2]\d-.*fortuner", href, re.I):
                     continue
-            if item.source_listing_id in seen:
+            existing = by_id.get(item.source_listing_id)
+            if existing:
+                by_id[item.source_listing_id] = self._enrich_listing(existing, item)
                 continue
-            seen.add(item.source_listing_id)
+            by_id[item.source_listing_id] = item
             out.append(item)
-        return out
+        # Keep original order, with enriched objects
+        return [by_id[i.source_listing_id] for i in out]
+
+    @staticmethod
+    def _enrich_listing(primary: ListingPayload, extra: ListingPayload) -> ListingPayload:
+        """Fill missing fields from a duplicate parse of the same listing id."""
+        updates: dict[str, Any] = {}
+        for field in (
+            "colour",
+            "dealer_name",
+            "dealer_location",
+            "price_zar",
+            "mileage_km",
+            "year",
+            "title",
+            "variant_raw",
+            "drivetrain",
+        ):
+            if getattr(primary, field) in (None, "", []) and getattr(extra, field) not in (None, "", []):
+                updates[field] = getattr(extra, field)
+        if not primary.image_urls and extra.image_urls:
+            updates["image_urls"] = extra.image_urls
+        if not updates:
+            return primary
+        return primary.model_copy(update=updates)
 
     @staticmethod
     def _drivetrain_from_text(*parts: str | None) -> str | None:
@@ -341,25 +367,13 @@ class CarsCoZaCollector(BaseCollector):
         return out
 
     def parse_api_json(self, data: Any) -> list[ListingPayload]:
-        items: list[Any] = []
-        if isinstance(data, dict):
-            for key in ("results", "listings", "vehicles", "data", "hits", "items"):
-                val = data.get(key)
-                if isinstance(val, list):
-                    items = val
-                    break
-                if isinstance(val, dict):
-                    nested = val.get("results") or val.get("listings") or val.get("hits")
-                    if isinstance(nested, list):
-                        items = nested
-                        break
-        elif isinstance(data, list):
-            items = data
+        items = self._listing_dicts_from_payload(data)
 
         results: list[ListingPayload] = []
         for row in items:
             if not isinstance(row, dict):
                 continue
+            row = self._flatten_api_row(row)
             title = str(row.get("title") or row.get("name") or row.get("heading") or "")
             blob = f"{title} {row.get('model') or ''} {row.get('variant') or ''}"
             if "fortuner" not in blob.lower() and str(row.get("model") or "").lower() != "fortuner":
@@ -369,13 +383,23 @@ class CarsCoZaCollector(BaseCollector):
                 or row.get("vehicle_id")
                 or row.get("vehicleId")
                 or row.get("listing_id")
+                or row.get("code")
                 or ""
             )
-            url = row.get("url") or row.get("permalink") or row.get("link")
+            url = (
+                row.get("website_url")
+                or row.get("url")
+                or row.get("permalink")
+                or row.get("link")
+            )
             if not listing_id and url:
                 listing_id = self._id_from_url(str(url))
-            if not listing_id:
-                continue
+            if not listing_id or not listing_id.isdigit():
+                # Ignore opaque codes; require numeric listing ids
+                if url:
+                    listing_id = self._id_from_url(str(url))
+                if not listing_id or not str(listing_id).isdigit():
+                    continue
             if url and str(url).startswith("/"):
                 url = f"https://www.cars.co.za{url}"
             if not url:
@@ -385,13 +409,26 @@ class CarsCoZaCollector(BaseCollector):
             price = row.get("price") or row.get("price_zar") or row.get("asking_price")
             mileage = row.get("mileage") or row.get("mileage_km") or row.get("odometer")
             year = row.get("year") or row.get("model_year")
-            if price in (None, "") and mileage in (None, ""):
+            price_zar = None
+            if price not in (None, ""):
+                try:
+                    price_zar = int(price)
+                except (TypeError, ValueError):
+                    price_zar = self._price(str(price))
+            mileage_km = None
+            if mileage not in (None, ""):
+                try:
+                    mileage_km = int(mileage)
+                except (TypeError, ValueError):
+                    mileage_km = self._mileage(str(mileage))
+            if price_zar is None and mileage_km is None:
                 continue
             location = (
                 row.get("location")
                 or row.get("area")
                 or row.get("province")
                 or row.get("city")
+                or row.get("agent_locality")
             )
             if isinstance(location, dict):
                 location = ", ".join(
@@ -402,21 +439,34 @@ class CarsCoZaCollector(BaseCollector):
             images = row.get("images") or row.get("image_urls") or []
             if isinstance(images, str):
                 images = [images]
+            elif isinstance(images, dict):
+                # Cars.co.za image descriptor object — skip for now
+                images = []
+            colour = row.get("colour") or row.get("color") or row.get("Colour")
+            if colour is not None:
+                colour = str(colour).strip() or None
             results.append(
                 ListingPayload(
                     source=self.source,
-                    source_listing_id=listing_id,
+                    source_listing_id=str(listing_id),
                     url=str(url),
                     title=title or f"Toyota Fortuner {listing_id}",
                     variant_raw=str(row.get("variant") or title or ""),
                     year=int(year) if year not in (None, "") else None,
-                    price_zar=int(price) if price not in (None, "") else None,
-                    mileage_km=int(mileage) if mileage not in (None, "") else None,
-                    dealer_name=row.get("dealer") or row.get("dealer_name") or row.get("seller"),
+                    price_zar=price_zar,
+                    mileage_km=mileage_km,
+                    colour=colour,
+                    dealer_name=row.get("dealer")
+                    or row.get("dealer_name")
+                    or row.get("seller")
+                    or row.get("agent_name"),
                     dealer_location=str(location) if location else None,
-                    image_urls=[str(x) for x in images[:12]],
+                    image_urls=[str(x) for x in images[:12] if x],
                     drivetrain=self._drivetrain_from_text(
-                        str(url), title, str(row.get("variant") or "")
+                        str(url),
+                        title,
+                        str(row.get("variant") or ""),
+                        str(row.get("vehicle_axle_config") or ""),
                     ),
                     make="Toyota",
                     model="Fortuner",
@@ -425,6 +475,62 @@ class CarsCoZaCollector(BaseCollector):
             )
         return results
 
+    @classmethod
+    def _listing_dicts_from_payload(cls, data: Any) -> list[Any]:
+        """Collect listing row dicts from flat API shapes or Cars.co.za NEXT_DATA."""
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
+        if not isinstance(data, dict):
+            return []
+
+        for key in ("results", "listings", "vehicles", "data", "hits", "items"):
+            val = data.get(key)
+            if isinstance(val, list) and val and isinstance(val[0], dict):
+                return val
+            if isinstance(val, dict):
+                nested = val.get("results") or val.get("listings") or val.get("hits") or val.get("data")
+                if isinstance(nested, list) and nested and isinstance(nested[0], dict):
+                    return nested
+
+        # __NEXT_DATA__ → props.initialState.searchCarReducer.searchResults
+        try:
+            search = (
+                data.get("props", {})
+                .get("initialState", {})
+                .get("searchCarReducer", {})
+                .get("searchResults")
+            )
+        except AttributeError:
+            search = None
+        if isinstance(search, dict):
+            rows: list[Any] = []
+            primary = search.get("data")
+            if isinstance(primary, list):
+                rows.extend(primary)
+            featured = (
+                (search.get("meta") or {}).get("featured_listings", {}).get("data")
+                if isinstance(search.get("meta"), dict)
+                else None
+            )
+            if isinstance(featured, list):
+                rows.extend(featured)
+            if rows:
+                return [x for x in rows if isinstance(x, dict)]
+
+        found = cls._find_list_in_obj(data)
+        return [x for x in found if isinstance(x, dict)] if isinstance(found, list) else []
+
+    @staticmethod
+    def _flatten_api_row(row: dict[str, Any]) -> dict[str, Any]:
+        """Unwrap JSON:API {id, attributes:{...}} rows into a flat dict."""
+        attrs = row.get("attributes")
+        if isinstance(attrs, dict):
+            flat = dict(attrs)
+            if row.get("id") is not None:
+                flat.setdefault("id", row["id"])
+            return flat
+        return row
+
     def parse_search_html(self, html: str) -> list[ListingPayload]:
         if "just a moment" in html.lower() and "/for-sale/" not in html.lower():
             return []
@@ -432,14 +538,17 @@ class CarsCoZaCollector(BaseCollector):
         results: list[ListingPayload] = []
         seen: set[str] = set()
 
-        # Next.js / embedded JSON blobs
+        # Next.js / embedded JSON blobs — prefer these (include colour)
         for script in soup.select("script#__NEXT_DATA__, script[type='application/json']"):
             try:
                 data = json.loads(script.string or "")
             except Exception:
                 continue
-            results.extend(self.parse_api_json(data))
-            results.extend(self.parse_api_json(self._find_list_in_obj(data)))
+            for item in self.parse_api_json(data):
+                if item.source_listing_id in seen:
+                    continue
+                seen.add(item.source_listing_id)
+                results.append(item)
 
         cards = soup.select(
             ".vehicle-card, .result-item, article.listing, [data-vehicle-id], "
@@ -543,7 +652,19 @@ class CarsCoZaCollector(BaseCollector):
             return data
         if not isinstance(data, dict):
             return []
-        for key in ("props", "pageProps", "fallback", "search", "vehicles", "results"):
+        for key in (
+            "props",
+            "pageProps",
+            "initialState",
+            "searchCarReducer",
+            "searchResults",
+            "fallback",
+            "search",
+            "vehicles",
+            "results",
+            "data",
+            "featured_listings",
+        ):
             if key in data:
                 found = CarsCoZaCollector._find_list_in_obj(data[key])
                 if found:

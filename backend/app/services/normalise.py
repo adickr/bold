@@ -37,6 +37,8 @@ def normalise_colour(colour: str | None) -> str | None:
     if not colour:
         return None
     c = _clean(colour).lower()
+    c = re.sub(r"\([^)]*\)", "", c).strip()
+    c = re.sub(r"\s+", " ", c)
     aliases = {
         "pearl white": "white",
         "super white": "white",
@@ -90,9 +92,12 @@ def colour_swatch_css(colour: str | None) -> str | None:
     if not colour:
         return None
     raw = _clean(colour).lower()
+    # Cars.co.za often appends paint codes: "Glacier White (040)"
+    raw = re.sub(r"\([^)]*\)", "", raw).strip()
+    raw = re.sub(r"\s+", " ", raw)
     if raw in _COLOUR_SWATCHES:
         return _COLOUR_SWATCHES[raw]
-    norm = normalise_colour(colour)
+    norm = normalise_colour(raw)
     if norm and norm in _COLOUR_SWATCHES:
         return _COLOUR_SWATCHES[norm]
     # Fallback: first token (e.g. "Graphite Grey" → try grey)

@@ -117,3 +117,97 @@ def test_merge_page_results_dedupes_html_and_api():
     rows = c._annotate(c._merge_page_results(html, [api]))
     assert len([r for r in rows if r.source_listing_id == "10999001"]) == 1
     assert rows[0].drivetrain == "4x4"
+
+
+def test_parse_next_data_extracts_colour():
+    """Cars.co.za __NEXT_DATA__ includes attributes.colour — must reach ListingPayload."""
+    html = r"""
+    <html><body>
+    <script id="__NEXT_DATA__" type="application/json">
+    {
+      "props": {
+        "initialState": {
+          "searchCarReducer": {
+            "searchResults": {
+              "data": [
+                {
+                  "type": "vehicle",
+                  "id": "11121766",
+                  "attributes": {
+                    "title": "2026 Toyota Fortuner 2.8 GD-6 4x4 Auto",
+                    "variant": "2.8 GD-6 4x4 Auto",
+                    "make": "Toyota",
+                    "model": "Fortuner",
+                    "year": 2026,
+                    "price": 799000,
+                    "mileage": "6 000 Km",
+                    "colour": "Grey",
+                    "agent_name": "Halfway Toyota George",
+                    "agent_locality": "George",
+                    "vehicle_axle_config": "4X4",
+                    "website_url": "https://www.cars.co.za/for-sale/used/2026-Toyota-Fortuner-2.8-GD-6-4x4-Auto-Western-Cape-George/11121766/"
+                  }
+                },
+                {
+                  "type": "vehicle",
+                  "id": "11014602",
+                  "attributes": {
+                    "title": "2025 Toyota Fortuner 2.4 GD-6 4x4 Auto",
+                    "variant": "2.4 GD-6 4x4 Auto",
+                    "make": "Toyota",
+                    "model": "Fortuner",
+                    "year": 2025,
+                    "price": 619995,
+                    "mileage": "41 000 Km",
+                    "colour": "WHITE",
+                    "website_url": "https://www.cars.co.za/for-sale/used/2025-Toyota-Fortuner-2.4-GD-6-4x4-Auto-Western-Cape-Rondebosch/11014602/"
+                  }
+                }
+              ],
+              "meta": {"featured_listings": {"data": []}}
+            }
+          }
+        }
+      }
+    }
+    </script>
+    </body></html>
+    """
+    c = CarsCoZaCollector(settings=Settings(preferred_province="Western Cape"))
+    rows = c._annotate(c._valid_vehicle_listings(c.parse_search_html(html)))
+    by_id = {r.source_listing_id: r for r in rows}
+    assert by_id["11121766"].colour == "Grey"
+    assert by_id["11121766"].mileage_km == 6000
+    assert by_id["11121766"].dealer_name == "Halfway Toyota George"
+    assert by_id["11014602"].colour == "WHITE"
+    assert all(r.drivetrain == "4x4" for r in rows)
+
+
+def test_enrich_keeps_colour_when_html_card_lacks_it():
+    c = CarsCoZaCollector(settings=Settings(preferred_province="Western Cape"))
+    html = """
+    <div class="vehicle-card" data-vehicle-id="11014602">
+      <a href="/for-sale/used/2025-Toyota-Fortuner-2.4-GD-6-4x4-Auto-Western-Cape-Rondebosch/11014602/">
+        <h2>2025 Toyota Fortuner 2.4 GD-6 4x4 Auto</h2>
+      </a>
+      <span class="price">R 619 995</span>
+      <span>41 000 Km</span>
+    </div>
+    """
+    api = {
+        "results": [
+            {
+                "id": "11014602",
+                "title": "2025 Toyota Fortuner 2.4 GD-6 4x4 Auto",
+                "url": "/for-sale/used/2025-Toyota-Fortuner-2.4-GD-6-4x4-Auto-Western-Cape-Rondebosch/11014602/",
+                "price": 619995,
+                "mileage": 41000,
+                "year": 2025,
+                "model": "Fortuner",
+                "colour": "Glacier White (040)",
+            }
+        ]
+    }
+    rows = c._annotate(c._merge_page_results(html, [api]))
+    assert len(rows) == 1
+    assert rows[0].colour == "Glacier White (040)"

@@ -241,7 +241,7 @@ class IngestionService:
         old_price = listing.price_zar
         listing.price_zar = payload.price_zar
         listing.mileage_km = payload.mileage_km
-        listing.colour = payload.colour
+        listing.colour = payload.colour or listing.colour
         listing.vin = payload.vin
         listing.registration = payload.registration
         listing.image_urls = normalise_image_urls(payload.image_urls, source=payload.source)
@@ -901,7 +901,13 @@ class IngestionService:
         vehicle.trim = primary.trim or vehicle.trim
         vehicle.special_edition = primary.special_edition or vehicle.special_edition
         vehicle.drivetrain = primary.drivetrain or vehicle.drivetrain
-        vehicle.colour = primary.colour or vehicle.colour
+        # Colour may live on a non-primary source (e.g. WeBuyCars / Cars.co.za)
+        vehicle.colour = (
+            primary.colour
+            or next((x.colour for x in active_linked if x.colour), None)
+            or next((x.colour for x in linked if x.colour), None)
+            or vehicle.colour
+        )
         vehicle.primary_dealer = primary.dealer_name or vehicle.primary_dealer
         vehicle.primary_location = primary.dealer_location or vehicle.primary_location
         if primary.image_urls:
