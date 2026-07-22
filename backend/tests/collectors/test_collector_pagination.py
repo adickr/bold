@@ -8,10 +8,16 @@ from app.config import Settings
 def test_autotrader_western_cape_url_includes_province_id():
     settings = Settings(preferred_province="Western Cape")
     c = AutoTraderCollector(settings=settings)
-    assert "/western-cape/p-9/toyota/fortuner/4x4" in c.search_base_url()
+    assert c.search_base_url().endswith("/western-cape/p-9/toyota/fortuner")
+    assert "/4x4" not in c.search_base_url()
     params = c.build_search_params(page=3)
     assert params["pagenumber"] == 3
     assert params["rcp"] == settings.collector_results_per_page
+    assert params["transmissiondrive"] == "4x4"
+    assert params["sortorder"] == "PriceLow"
+    assert params["year"] == "more-than-2015"
+    url = f"{c.search_base_url()}?{__import__('urllib.parse', fromlist=['urlencode']).urlencode(params)}"
+    assert "transmissiondrive=4x4" in url
 
 
 def test_cars_co_za_pagination_param():

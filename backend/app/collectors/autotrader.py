@@ -42,9 +42,9 @@ class AutoTraderCollector(BaseCollector):
     source = "autotrader"
     category = "marketplace"
 
-    SEARCH_URL = "https://www.autotrader.co.za/cars-for-sale/toyota/fortuner/4x4"
+    SEARCH_URL = "https://www.autotrader.co.za/cars-for-sale/toyota/fortuner"
     # Province URLs need the province id segment (p-9 = Western Cape)
-    SEARCH_URL_WC = "https://www.autotrader.co.za/cars-for-sale/western-cape/p-9/toyota/fortuner/4x4"
+    SEARCH_URL_WC = "https://www.autotrader.co.za/cars-for-sale/western-cape/p-9/toyota/fortuner"
 
     def search_base_url(self) -> str:
         preferred = (self.settings.preferred_province or "").strip().lower()
@@ -53,7 +53,12 @@ class AutoTraderCollector(BaseCollector):
         return self.SEARCH_URL
 
     def build_search_params(self, page: int = 1) -> dict[str, Any]:
+        # Match the live site filter shape, e.g.
+        # .../toyota/fortuner?sortorder=PriceLow&year=more-than-2015&transmissiondrive=4x4
         params: dict[str, Any] = {
+            "sortorder": "PriceLow",
+            "year": "more-than-2015",
+            "transmissiondrive": "4x4",
             "mileage_to": self.settings.stretch_mileage_km,
             "rcp": self.settings.collector_results_per_page,
         }
