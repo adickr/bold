@@ -205,6 +205,18 @@ button:disabled { opacity: 0.65; cursor: wait; }
   50% { transform: scale(1.15); opacity: 0.75; }
 }
 
+tr.is-new-listing {
+  animation: listing-arrive 1.2s ease;
+}
+@keyframes listing-arrive {
+  from { background: rgba(126, 200, 163, 0.22); }
+  to { background: transparent; }
+}
+[data-live-listings] .section-head {
+  display: flex; justify-content: space-between; align-items: end; gap: 1rem; flex-wrap: wrap;
+}
+[data-live-count]:not(:empty)::before { content: ""; }
+
 #draft-message { width: 100%; min-height: 160px; }
 .footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.78rem; border-top: 1px solid var(--line); padding-top: 1rem; }
 

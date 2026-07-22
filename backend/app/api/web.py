@@ -60,6 +60,37 @@ def page_collect_status(user: str = Depends(require_web_user)):
     return get_collect_status()
 
 
+@router.get("/live/snapshot")
+def page_live_snapshot(
+    db: Session = Depends(get_db),
+    user: str = Depends(require_web_user),
+    limit: int = 24,
+):
+    """Incremental dashboard data while collectors are running."""
+    stats = dashboard_stats(db)
+    matching = filter_vehicles(db, default_buyer_filters())
+    nationwide = filter_vehicles(
+        db, VehicleFilterParams(active_only=True, sort="price_asc")
+    )
+    limit = max(1, min(limit, 60))
+    return {
+        "collect": get_collect_status(),
+        "stats": {
+            "active_matching": stats.active_matching,
+            "new_today": stats.new_today,
+            "reductions_this_week": stats.reductions_this_week,
+            "median_asking_price": stats.median_asking_price,
+            "top_deal": stats.top_deal,
+            "best_grs": stats.best_grs,
+            "best_vx": stats.best_vx,
+            "most_motivated": stats.most_motivated,
+        },
+        "nationwide_count": len(nationwide),
+        "matching_count": len(matching),
+        "vehicles": [vehicle_to_dict(v) for v in matching[:limit]],
+    }
+
+
 @router.get("/login", response_class=HTMLResponse)
 def page_login(request: Request, next: str = "/", error: str | None = None):
     if request.session.get("user"):

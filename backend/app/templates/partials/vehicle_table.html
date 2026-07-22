@@ -17,9 +17,9 @@
         <th>Shortlist</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody data-live-tbody>
       {% for v in vehicles %}
-      <tr>
+      <tr data-vehicle-id="{{ v.id }}">
         <td class="thumb">
           {% if v.image %}
             <a href="{{ v.detail_path }}">
