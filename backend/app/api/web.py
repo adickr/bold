@@ -35,6 +35,11 @@ from app.schemas.listings import (
 from app.services.shortlist import ShortlistService, draft_dealer_message
 
 from app.services.collect_job import get_collect_status, start_collect_job
+from app.services.search_profile import (
+    get_or_create_active_profile,
+    profile_to_criteria,
+    save_active_profile,
+)
 
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[1] / "templates"))
@@ -57,6 +62,34 @@ def page_collect(user: str = Depends(require_web_user)):
     return RedirectResponse("/?scanning=1", status_code=303)
 
 
+@router.post("/search-profile")
+def page_save_search_profile(
+    db: Session = Depends(get_db),
+    user: str = Depends(require_web_user),
+    province: str = Form(""),
+    max_mileage_km: int = Form(100_000),
+    required_drivetrain: str = Form("4x4"),
+    max_price_zar: str = Form(""),
+    enforce_max_price: str | None = Form(None),
+    action: str = Form("save"),
+):
+    """Save active search criteria; optionally start a collect with those params."""
+    price_raw = (max_price_zar or "").strip()
+    price_val = int(price_raw) if price_raw.isdigit() else None
+    save_active_profile(
+        db,
+        province=(province or "").strip() or None,
+        max_mileage_km=max_mileage_km,
+        required_drivetrain=required_drivetrain,
+        max_price_zar=price_val,
+        enforce_max_price=bool(enforce_max_price),
+    )
+    if action == "collect":
+        start_collect_job()
+        return RedirectResponse("/?scanning=1", status_code=303)
+    return RedirectResponse("/?saved=1", status_code=303)
+
+
 @router.get("/collect/status")
 def page_collect_status(user: str = Depends(require_web_user)):
     return get_collect_status()
@@ -70,7 +103,7 @@ def page_live_snapshot(
 ):
     """Incremental dashboard data while collectors are running."""
     stats = dashboard_stats(db)
-    matching = filter_vehicles(db, default_buyer_filters())
+    matching = filter_vehicles(db, default_buyer_filters(db))
     nationwide = filter_vehicles(
         db, VehicleFilterParams(active_only=True, sort="deal_score_desc")
     )
@@ -151,15 +184,17 @@ def page_dashboard(
     collected: int | None = None,
     total: int | None = None,
     scanning: int | None = None,
+    saved: int | None = None,
 ):
     stats = dashboard_stats(db)
-    matching = filter_vehicles(db, default_buyer_filters())
+    matching = filter_vehicles(db, default_buyer_filters(db))
     list_limit = 12
     vehicles = matching[:list_limit]
     nationwide = filter_vehicles(
         db, VehicleFilterParams(active_only=True, sort="deal_score_desc")
     )
     collect_status = get_collect_status()
+    profile = get_or_create_active_profile(db)
     return templates.TemplateResponse(
         request,
         "pages/dashboard.html",
@@ -175,6 +210,9 @@ def page_dashboard(
             "total": total,
             "scanning": bool(scanning) or collect_status.get("running"),
             "collect_status": collect_status,
+            "search_profile": profile,
+            "search_criteria": profile_to_criteria(profile),
+            "saved": bool(saved),
         },
     )
 
@@ -203,7 +241,7 @@ def page_listings(
     # First visit (no query): buyer defaults. Form submit uses submitted values as-is
     # so clearing a field (e.g. province) widens the search.
     if not request.query_params:
-        params = default_buyer_filters()
+        params = default_buyer_filters(db)
     else:
         params = VehicleFilterParams(
             min_price=min_price,

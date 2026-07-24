@@ -26,6 +26,7 @@ from app.services.dedup import score_pair, should_auto_merge, strong_identity_ma
 from app.services.market import compute_comparable_stats, refresh_market_fields
 from app.services.media import absolute_url, normalise_image_urls, normalise_listing_url
 from app.services.scoring import compute_deal_score, compute_motivation_score
+from app.services.search_profile import criteria_from_settings, is_hard_reject
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,11 @@ class IngestionService:
     def ingest_payloads(
         self, source: str, payloads: list[ListingPayload], *, full_scan: bool = True
     ) -> dict[str, Any]:
-        run = CollectorRun(source=source, started_at=_utcnow())
+        run = CollectorRun(
+            source=source,
+            started_at=_utcnow(),
+            criteria=criteria_from_settings(self.settings),
+        )
         self.db.add(run)
         self.db.flush()
 
@@ -85,8 +90,9 @@ class IngestionService:
 
                 result = evaluate_listing(payload, self.settings)
                 if not result.accepted or not result.variant:
-                    # Drop already-stored noise immediately (don't wait for miss counters)
-                    self._reject_existing_payload(payload, result.reasons)
+                    # Soft criteria (e.g. mileage) skip this wave without wiping stored rows
+                    if is_hard_reject(result.reasons, self.settings):
+                        self._reject_existing_payload(payload, result.reasons)
                     continue
                 # Repair / reject broken marketplace URLs before persist
                 fixed_url = normalise_listing_url(
@@ -406,10 +412,12 @@ class IngestionService:
                 if listing.source == "cars_co_za" and payload.drivetrain != listing.drivetrain:
                     listing.drivetrain = payload.drivetrain
                 continue
+            if not is_hard_reject(result.reasons, self.settings):
+                continue
             self._reject_existing_payload(payload, result.reasons)
             removed += 1
         if removed:
-            logger.info("Purged %s listings that fail current buyer criteria", removed)
+            logger.info("Purged %s listings that fail hard buyer criteria", removed)
         return removed
 
     def _mark_payload_unavailable(self, payload: ListingPayload) -> None:
@@ -450,7 +458,11 @@ class IngestionService:
         )
 
     def _mark_missing(self, source: str, seen_ids: set[str]) -> None:
-        """Only mark removals after successful scan with findings (caller ensures non-empty)."""
+        """Only mark removals after successful scan with findings (caller ensures non-empty).
+
+        Listings outside the active search window (e.g. higher mileage after you
+        tighten max km) are kept — they would not appear in this wave's results.
+        """
         stmt = select(SourceListing).where(
             SourceListing.source == source,
             SourceListing.listing_status.in_(
@@ -465,6 +477,11 @@ class IngestionService:
         now = _utcnow()
         for listing in active:
             if listing.source_listing_id in seen_ids:
+                continue
+            payload = self._payload_from_listing(listing)
+            result = evaluate_listing(payload, self.settings)
+            if not result.accepted:
+                # Outside this collect's criteria — preserve stock for later searches
                 continue
             listing.consecutive_misses += 1
             if listing.consecutive_misses >= self.settings.missed_scans_removed:

@@ -23,10 +23,13 @@ def _day_start(dt: datetime) -> datetime:
 
 
 def record_market_snapshot(db: Session) -> MarketSnapshot:
-    """Upsert today's snapshot for buyer-default matching stock."""
+    """Upsert today's snapshot for the active search profile's matching stock."""
     from app.api.queries import default_buyer_filters, filter_vehicles
+    from app.services.search_profile import criteria_hash, criteria_label, get_active_criteria
 
-    matching = filter_vehicles(db, default_buyer_filters())
+    criteria = get_active_criteria(db)
+    c_hash = criteria_hash(criteria)
+    matching = filter_vehicles(db, default_buyer_filters(db))
     prices = [v.current_lowest_price for v in matching if v.current_lowest_price]
     mileages = [v.current_mileage_km for v in matching if v.current_mileage_km is not None]
     days = [v.days_tracked for v in matching if v.days_tracked is not None]
@@ -52,13 +55,33 @@ def record_market_snapshot(db: Session) -> MarketSnapshot:
     existing = (
         db.execute(
             select(MarketSnapshot)
-            .where(MarketSnapshot.snapshot_date >= today)
+            .where(
+                MarketSnapshot.snapshot_date >= today,
+                MarketSnapshot.criteria_hash == c_hash,
+            )
             .order_by(MarketSnapshot.snapshot_date.desc())
             .limit(1)
         )
         .scalars()
         .first()
     )
+    # Fall back to legacy untagged row for today when hash column is new
+    if existing is None:
+        legacy = (
+            db.execute(
+                select(MarketSnapshot)
+                .where(
+                    MarketSnapshot.snapshot_date >= today,
+                    MarketSnapshot.criteria_hash.is_(None),
+                )
+                .order_by(MarketSnapshot.snapshot_date.desc())
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+        existing = legacy
+
     payload = dict(
         active_count=len(matching),
         new_count=sum(
@@ -78,7 +101,8 @@ def record_market_snapshot(db: Session) -> MarketSnapshot:
         median_mileage=int(median(mileages)) if mileages else None,
         median_days_on_market=float(median(days)) if days else None,
         variant_breakdown=breakdown,
-        notes="WC · 4x4 · ≤100k km · asking prices only",
+        notes=f"{criteria_label(criteria)} · asking prices only",
+        criteria_hash=c_hash,
     )
 
     if existing:
@@ -102,8 +126,11 @@ def build_market_history(
     live_median: int | None = None,
 ) -> dict[str, Any]:
     """Daily active-match series for the dashboard sparkline."""
+    from app.services.search_profile import criteria_hash, get_active_criteria
+
     span = max(7, days)
     since = _day_start(_utcnow()) - timedelta(days=span - 1)
+    c_hash = criteria_hash(get_active_criteria(db))
     rows = list(
         db.execute(
             select(MarketSnapshot)
@@ -115,8 +142,13 @@ def build_market_history(
     )
     by_day: dict[str, MarketSnapshot] = {}
     for row in rows:
+        # Prefer snapshots for the active criteria; allow legacy null-hash rows
+        if row.criteria_hash not in (None, c_hash):
+            continue
         key = _day_start(row.snapshot_date).date().isoformat()
-        by_day[key] = row  # keep latest write for that day
+        if key in by_day and by_day[key].criteria_hash == c_hash and row.criteria_hash is None:
+            continue
+        by_day[key] = row
 
     points: list[dict[str, Any]] = []
     for i in range(span):

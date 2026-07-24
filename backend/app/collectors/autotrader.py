@@ -62,8 +62,12 @@ class AutoTraderCollector(BaseCollector):
         mileage_cap = max(1, int(self.settings.max_mileage_km))
         params: dict[str, Any] = {
             "mileage": f"less-than-{mileage_cap}",
-            "transmissiondrive": "4x4",
         }
+        req = (self.settings.required_drivetrain or "").strip().lower().replace(" ", "")
+        if req in {"4x4", "4wd", "awd"}:
+            params["transmissiondrive"] = "4x4"
+        elif req in {"4x2", "2wd"}:
+            params["transmissiondrive"] = "4x2"
         if page > 1:
             params["pagenumber"] = page
         return params
@@ -582,16 +586,12 @@ class AutoTraderCollector(BaseCollector):
         return self._annotate_search_scope(self.parse_search_html(html))
 
     def _annotate_search_scope(self, listings: list[ListingPayload]) -> list[ListingPayload]:
-        """Keep cards with an explicit 4x4 signal in URL **or** title/variant.
-
-        Real AT 4x4 SEO slugs often omit ``4x4`` (e.g. ``/2.8gd-6/{id}``) while the
-        embedded variant still says ``2.8GD-6 4x4 VX``. Requiring the slug alone
-        empties the collect. Never invent 4x4 from search scope when neither the
-        URL nor the listing text says so (that is how non-4x4s like 28658500
-        used to rank #1).
-        """
+        """Keep cards that match the active drivetrain requirement."""
         preferred = (self.settings.preferred_province or "").strip()
         is_wc = preferred.lower() in {"western cape", "wc", "western-cape"}
+        req = (self.settings.required_drivetrain or "").strip().lower().replace(" ", "")
+        require_4x4 = req in {"4x4", "4wd", "awd"}
+        require_4x2 = req in {"4x2", "2wd"}
 
         out: list[ListingPayload] = []
         dropped = 0
@@ -609,13 +609,22 @@ class AutoTraderCollector(BaseCollector):
                 # Chip-only strings are not evidence of axle
                 text_dt = None
 
-            if url_dt == "4x2" or text_dt == "4x2":
-                dropped += 1
-                continue
-            if url_dt != "4x4" and text_dt != "4x4":
-                dropped += 1
-                continue
-            data["drivetrain"] = "4x4"
+            detected = url_dt or text_dt
+            if require_4x4:
+                if url_dt == "4x2" or text_dt == "4x2":
+                    dropped += 1
+                    continue
+                if url_dt != "4x4" and text_dt != "4x4":
+                    dropped += 1
+                    continue
+                data["drivetrain"] = "4x4"
+            elif require_4x2:
+                if detected != "4x2":
+                    dropped += 1
+                    continue
+                data["drivetrain"] = "4x2"
+            elif detected:
+                data["drivetrain"] = detected
             if self._is_chip_title(data.get("title")):
                 data["title"] = self._resolve_title(data.get("title"), data.get("url"), compact)
                 data["variant_raw"] = data.get("variant_raw") or data["title"]
@@ -628,7 +637,7 @@ class AutoTraderCollector(BaseCollector):
             out.append(ListingPayload.model_validate(data))
         if dropped:
             logger.info(
-                "AutoTrader: dropped %s card(s) without explicit 4x4 in URL/title",
+                "AutoTrader: dropped %s card(s) outside drivetrain filter",
                 dropped,
             )
         return [x for x in out if self._is_plausible_card(x)]

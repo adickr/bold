@@ -2,53 +2,47 @@
 {% block title %}Dashboard · Fortuner Agent{% endblock %}
 {% block content %}
 {% from "partials/score_widgets.html" import deal_score_widget, motivation_widget %}
+{% set sp = search_profile %}
+{% set sc = search_criteria or {} %}
+{% set lf = stats.last_fetch %}
 <section class="hero-panel">
-  <div>
+  <div class="hero-copy">
     <p class="eyebrow">South African used market</p>
-    <h1>Toyota Fortuner 4x4 watch</h1>
-    <p class="lede">Cross-site history for Western Cape 4x4s under 100k km — best deal score first, with alerts when something exceptional shows up.</p>
-    <form method="post" action="/collect" class="inline-form collect-form" style="margin-top:1rem" data-collect-form>
-      <button type="submit" data-collect-btn {% if scanning %}disabled{% endif %}>
-        {% if scanning %}Scanning…{% else %}Collect live listings now{% endif %}
-      </button>
-    </form>
-    <p class="muted tiny">Runs AutoTrader, Cars.co.za and WeBuyCars (often 2–5 minutes). Progress updates live below.</p>
+    <h1>Toyota Fortuner watch</h1>
+    <p class="lede">Set your search, collect live listings, and rank by deal score. Changing criteria keeps prior stock in the database — the dashboard shows matches for the active search.</p>
 
-    <div class="fetch-meta" data-fetch-meta>
-      {% set lf = stats.last_fetch %}
-      {% if lf and lf.last_fetch_at %}
-      <p class="fetch-line">
-        <span class="muted">Last fetch</span>
-        <time class="mono" data-fetch-at datetime="{{ lf.last_fetch_at }}">{{ lf.last_fetch_at }}</time>
-        <span class="fetch-sep">·</span>
-        <span class="fetch-changes {% if lf.has_material %}has-changes{% else %}no-changes{% endif %}" data-fetch-changes>
-          {{ lf.summary }}
-        </span>
-      </p>
-      {% if lf.highlights %}
-      <ul class="fetch-highlights" data-fetch-highlights>
-        {% for h in lf.highlights[:6] %}
-        <li data-kind="{{ h.kind }}">
-          <a href="{{ h.href }}">{{ h.label }}{% if h.detail %} <span class="mono">{{ h.detail }}</span>{% endif %}</a>
-        </li>
-        {% endfor %}
-      </ul>
-      {% else %}
-      <ul class="fetch-highlights" data-fetch-highlights hidden></ul>
-      {% endif %}
-      <p class="fetch-actions">
-        <button type="button" class="text-link-btn" data-what-changed-btn>
-          {{ lf.updates_label or 'Show all updates' }}
+    <form method="post" action="/search-profile" class="search-profile-form" data-search-profile-form>
+      <div class="search-profile-grid">
+        <label>Province
+          <input type="text" name="province" value="{{ sp.province or '' }}" placeholder="Western Cape (blank = nationwide)" />
+        </label>
+        <label>Max km
+          <input type="number" name="max_mileage_km" value="{{ sp.max_mileage_km or 100000 }}" min="1000" step="1000" required />
+        </label>
+        <label>Drivetrain
+          <select name="required_drivetrain">
+            <option value="4x4" {% if (sp.required_drivetrain or '4x4') == '4x4' %}selected{% endif %}>4x4</option>
+            <option value="4x2" {% if sp.required_drivetrain == '4x2' %}selected{% endif %}>4x2</option>
+            <option value="" {% if not sp.required_drivetrain %}selected{% endif %}>Any</option>
+          </select>
+        </label>
+        <label>Comfort price
+          <input type="number" name="max_price_zar" value="{{ sp.max_price_zar or '' }}" placeholder="e.g. 700000" />
+        </label>
+      </div>
+      <label class="check search-profile-check">
+        <input type="checkbox" name="enforce_max_price" value="1" {% if sp.enforce_max_price %}checked{% endif %} />
+        Hard price cap on marketplace searches
+      </label>
+      <p class="muted tiny search-profile-label">Active: <strong>{{ sp.label or '—' }}</strong>{% if saved %} · saved{% endif %}</p>
+      <div class="search-profile-actions">
+        <button type="submit" name="action" value="save" class="btn-ghost">Save search</button>
+        <button type="submit" name="action" value="collect" data-collect-btn {% if scanning %}disabled{% endif %}>
+          {% if scanning %}Scanning…{% else %}Save &amp; collect live{% endif %}
         </button>
-      </p>
-      {% else %}
-      <p class="fetch-line muted" data-fetch-empty>No fetch yet — run <strong>Collect live listings now</strong>.</p>
-      <ul class="fetch-highlights" data-fetch-highlights hidden></ul>
-      <p class="fetch-actions" hidden>
-        <button type="button" class="text-link-btn" data-what-changed-btn>Show all updates</button>
-      </p>
-      {% endif %}
-    </div>
+      </div>
+      <p class="muted tiny">Runs AutoTrader, Cars.co.za and WeBuyCars (often 2–5 minutes). Soft criteria (mileage) keep older rows when you tighten the search later.</p>
+    </form>
 
     <dialog class="changes-dialog" data-changes-dialog>
       <form method="dialog" class="changes-dialog-head">
@@ -172,13 +166,47 @@
     {% if collected is not none %}
     <p class="lede">Collection finished: {{ collected }}/{{ total }} sources succeeded.
       {% if nationwide_count is defined %}{{ nationwide_count }} active nationwide{% endif %}
-      · {{ stats.active_matching }} match WC · 4x4 · ≤100k km.
+      · {{ stats.active_matching }} match {{ sp.label or 'active search' }}.
       {% if stats.active_matching == 0 and nationwide_count %}
-        <a href="/listings?sort=deal_score_desc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA</a> while WC stock catches up after re-collect.
+        <a href="/listings?sort=deal_score_desc">Show everything</a> while stock catches up after re-collect.
       {% endif %}
     </p>
     {% endif %}
   </div>
+
+  <aside class="hero-fetch" data-fetch-meta>
+    <p class="hero-fetch-label">Last fetch</p>
+    {% if lf and lf.last_fetch_at %}
+    <p class="fetch-line">
+      <time class="mono" data-fetch-at datetime="{{ lf.last_fetch_at }}">{{ lf.last_fetch_at }}</time>
+    </p>
+    <p class="fetch-changes {% if lf.has_material %}has-changes{% else %}no-changes{% endif %}" data-fetch-changes>
+      {{ lf.summary }}
+    </p>
+    {% if lf.highlights %}
+    <ul class="fetch-highlights" data-fetch-highlights>
+      {% for h in lf.highlights[:6] %}
+      <li data-kind="{{ h.kind }}">
+        <a href="{{ h.href }}">{{ h.label }}{% if h.detail %} <span class="mono">{{ h.detail }}</span>{% endif %}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <ul class="fetch-highlights" data-fetch-highlights hidden></ul>
+    {% endif %}
+    <p class="fetch-actions">
+      <button type="button" class="text-link-btn" data-what-changed-btn>
+        {{ lf.updates_label or 'Show all updates' }}
+      </button>
+    </p>
+    {% else %}
+    <p class="fetch-line muted" data-fetch-empty>No fetch yet — save &amp; collect to start.</p>
+    <ul class="fetch-highlights" data-fetch-highlights hidden></ul>
+    <p class="fetch-actions" hidden>
+      <button type="button" class="text-link-btn" data-what-changed-btn>Show all updates</button>
+    </p>
+    {% endif %}
+  </aside>
 </section>
 
 <section class="spotlight-grid" data-live-spotlights>
@@ -244,7 +272,7 @@
   <div class="section-head">
     <div>
       <h2>Market snapshot</h2>
-      <p class="muted tiny">WC · 4x4 · ≤100k km — stock by asking-price band</p>
+      <p class="muted tiny">{{ search_profile.label if search_profile else 'Active search' }} — stock by asking-price band</p>
     </div>
   </div>
 
@@ -304,9 +332,9 @@
   {% endif %}
 </section>
 
-<section data-live-listings data-list-limit="{{ list_limit }}" data-matching-count="{{ matching_count }}">
+<section data-live-listings data-list-limit="{{ list_limit }}" data-matching-count="{{ matching_count }}" data-search-label="{{ search_profile.label if search_profile else 'active search' }}">
   <div class="section-head">
-    <h2>Best matching deals (WC · 4x4 · ≤100k km)</h2>
+    <h2>Best matching deals ({{ search_profile.label if search_profile else 'active search' }})</h2>
     <span class="muted tiny" data-live-count>{% if matching_count %}{{ matching_count }} matching{% endif %}</span>
   </div>
   {% include "partials/vehicle_table.html" %}

@@ -16,7 +16,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
 
 (function collectProgress() {
   const panel = document.querySelector("[data-collect-progress]");
-  const form = document.querySelector("[data-collect-form]");
+  const form = document.querySelector("[data-collect-form], [data-search-profile-form]");
   if (!panel) return;
 
   const messageEl = panel.querySelector("[data-collect-message]");
@@ -24,6 +24,10 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
   const barEl = panel.querySelector("[data-collect-bar]");
   const listEl = panel.querySelector("[data-collect-sources]");
   const btn = document.querySelector("[data-collect-btn]");
+  const collectBtnDefault =
+    btn && btn.getAttribute("name") === "action"
+      ? "Save & collect live"
+      : "Collect live listings now";
   const tbody = document.querySelector("[data-live-tbody]");
   const liveCount = document.querySelector("[data-live-count]");
   const listingsSection = document.querySelector("[data-live-listings]");
@@ -76,7 +80,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     if (barEl) barEl.style.width = `${Math.max(0, Math.min(100, percent))}%`;
     if (btn) {
       btn.disabled = running;
-      btn.textContent = running ? "Scanning…" : "Collect live listings now";
+      btn.textContent = running ? "Scanning…" : collectBtnDefault;
     }
     (status.sources || []).forEach((s) => {
       const li = ensureSourceRow(s.source, s.label);
@@ -240,23 +244,28 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     lastFetchState = lastFetch || null;
     const root = document.querySelector("[data-fetch-meta]");
     if (!root) return;
-    const empty = root.querySelector("[data-fetch-empty]");
-    let line = root.querySelector(".fetch-line:not([data-fetch-empty])");
+    let empty = root.querySelector("[data-fetch-empty]");
+    let timeEl = root.querySelector("[data-fetch-at]");
+    let changesEl = root.querySelector("[data-fetch-changes]");
     const highlights = root.querySelector("[data-fetch-highlights]");
     const actions = root.querySelector(".fetch-actions");
     const btn = root.querySelector("[data-what-changed-btn]");
     const dialog = document.querySelector("[data-changes-dialog]");
+    const labelEl = root.querySelector(".hero-fetch-label");
 
     if (!lastFetch || !lastFetch.last_fetch_at) {
-      if (line && !line.matches("[data-fetch-empty]")) line.remove();
-      if (empty) {
-        empty.hidden = false;
+      const staleLine = root.querySelector(".fetch-line:not([data-fetch-empty])");
+      if (staleLine) staleLine.remove();
+      if (changesEl && changesEl.closest(".fetch-line") == null) changesEl.remove();
+      if (!empty) {
+        empty = document.createElement("p");
+        empty.className = "fetch-line muted";
+        empty.dataset.fetchEmpty = "1";
+        empty.textContent = "No fetch yet — save & collect to start.";
+        if (labelEl && labelEl.nextSibling) root.insertBefore(empty, labelEl.nextSibling);
+        else root.appendChild(empty);
       } else {
-        const p = document.createElement("p");
-        p.className = "fetch-line muted";
-        p.dataset.fetchEmpty = "1";
-        p.innerHTML = 'No fetch yet — run <strong>Collect live listings now</strong>.';
-        root.prepend(p);
+        empty.hidden = false;
       }
       if (highlights) {
         highlights.innerHTML = "";
@@ -268,26 +277,32 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     }
 
     if (empty) empty.remove();
+
+    let line = root.querySelector(".fetch-line:not([data-fetch-empty])");
     if (!line) {
       line = document.createElement("p");
       line.className = "fetch-line";
-      line.innerHTML = `<span class="muted">Last fetch</span>
-        <time class="mono" data-fetch-at></time>
-        <span class="fetch-sep">·</span>
-        <span class="fetch-changes" data-fetch-changes></span>`;
-      root.prepend(line);
+      line.innerHTML = `<time class="mono" data-fetch-at></time>`;
+      if (labelEl && labelEl.nextSibling) root.insertBefore(line, labelEl.nextSibling);
+      else root.prepend(line);
     }
-    const timeEl = line.querySelector("[data-fetch-at]");
-    const changesEl = line.querySelector("[data-fetch-changes]");
+    timeEl = line.querySelector("[data-fetch-at]") || root.querySelector("[data-fetch-at]");
     if (timeEl) {
       timeEl.setAttribute("datetime", lastFetch.last_fetch_at);
       timeEl.textContent = formatFetchTime(lastFetch.last_fetch_at);
     }
-    if (changesEl) {
-      changesEl.textContent = lastFetch.summary || "No new stock or price cuts";
-      changesEl.classList.toggle("has-changes", !!lastFetch.has_material);
-      changesEl.classList.toggle("no-changes", !lastFetch.has_material);
+
+    changesEl = root.querySelector("[data-fetch-changes]");
+    if (!changesEl) {
+      changesEl = document.createElement("p");
+      changesEl.className = "fetch-changes";
+      changesEl.dataset.fetchChanges = "1";
+      line.insertAdjacentElement("afterend", changesEl);
     }
+    changesEl.textContent = lastFetch.summary || "No new stock or price cuts";
+    changesEl.classList.toggle("has-changes", !!lastFetch.has_material);
+    changesEl.classList.toggle("no-changes", !lastFetch.has_material);
+
     if (highlights) {
       const items = lastFetch.highlights || [];
       if (!items.length) {
@@ -637,9 +652,11 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     if (!vehicles || !vehicles.length) {
       let extra = "";
       if (nationwideCount > 0) {
-        extra = `<p>${nationwideCount} active nationwide — none match WC · 4x4 · ≤100k km yet.
-          <a class="btn-link" href="/listings?sort=deal_score_desc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA</a>
-          · <a class="btn-link" href="/listings?sort=deal_score_desc">Show everything</a></p>`;
+        const label =
+          (listingsSection && listingsSection.getAttribute("data-search-label")) ||
+          "the active search";
+        extra = `<p>${nationwideCount} active nationwide — none match ${escapeHtml(label)} yet.
+          <a class="btn-link" href="/listings?sort=deal_score_desc">Show everything</a></p>`;
       } else {
         extra = `<p class="muted">Keep scanning — results appear here as each source finishes.</p>`;
       }
@@ -715,7 +732,15 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
   }
 
   if (form) {
-    form.addEventListener("submit", () => {
+    form.addEventListener("submit", (event) => {
+      const submitter = event.submitter;
+      const action =
+        submitter && submitter.getAttribute("name") === "action"
+          ? submitter.value
+          : form.matches("[data-collect-form]")
+            ? "collect"
+            : "save";
+      if (action !== "collect") return;
       panel.classList.add("is-active");
       panel.dataset.autoPoll = "1";
       finishedHandled = false;

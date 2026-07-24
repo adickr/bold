@@ -311,6 +311,30 @@ class CollectorRun(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     parser_broken: Mapped[bool] = mapped_column(Boolean, default=False)
     raw_snapshot_path: Mapped[str | None] = mapped_column(Text)
+    criteria: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class SearchProfile(Base):
+    """Single active collect/browse criteria set (seeded from Settings)."""
+
+    __tablename__ = "search_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), default="Active search")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    province: Mapped[str | None] = mapped_column(String(128))
+    max_mileage_km: Mapped[int] = mapped_column(Integer, default=100_000)
+    required_drivetrain: Mapped[str | None] = mapped_column(String(16), default="4x4")
+    max_price_zar: Mapped[int | None] = mapped_column(Integer)
+    enforce_max_price: Mapped[bool] = mapped_column(Boolean, default=False)
+    criteria_hash: Mapped[str | None] = mapped_column(String(32), index=True)
+    label: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class AlertLog(Base):
@@ -362,3 +386,4 @@ class MarketSnapshot(Base):
     median_days_on_market: Mapped[float | None] = mapped_column(Float)
     variant_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     notes: Mapped[str | None] = mapped_column(Text)
+    criteria_hash: Mapped[str | None] = mapped_column(String(32), index=True)

@@ -69,6 +69,7 @@ def test_sort_vehicles_price_asc():
             self.current_mileage_km = mileage
             self.deal_score = None
             self.year = None
+            self.shortlist_entry = None
 
     ordered = sort_vehicles([V(300), V(None), V(100), V(200)], "price_asc")
     assert [v.current_lowest_price for v in ordered] == [100, 200, 300, None]
@@ -81,6 +82,7 @@ def test_sort_demotes_unknown_mileage():
             self.current_mileage_km = mileage
             self.deal_score = None
             self.year = None
+            self.shortlist_entry = None
 
     # Cheaper unknown-mileage car should still rank below dearer known-mileage
     ordered = sort_vehicles(

@@ -103,9 +103,13 @@ class WeBuyCarsCollector(BaseCollector):
             ("km_max", max_km),
             ("km", 0),
             ("km", max_km),
-            ("axle", "4X4"),
             ("q", "Toyota Fortuner"),
         ]
+        req = (self.settings.required_drivetrain or "").strip().lower().replace(" ", "")
+        if req in {"4x4", "4wd", "awd"}:
+            params.insert(-1, ("axle", "4X4"))
+        elif req in {"4x2", "2wd"}:
+            params.insert(-1, ("axle", "4X2"))
         preferred = (self.settings.preferred_province or "").strip()
         if preferred:
             # Live site uses plain province=Western+Cape (not a JSON array)
@@ -119,6 +123,12 @@ class WeBuyCarsCollector(BaseCollector):
         max_km = int(self.settings.max_mileage_km or 100_000)
         preferred = (self.settings.preferred_province or "").strip()
         province: list[str] | None = [preferred] if preferred else None
+        req = (self.settings.required_drivetrain or "").strip().lower().replace(" ", "")
+        axle: list[str] | None = None
+        if req in {"4x4", "4wd", "awd"}:
+            axle = ["4X4"]
+        elif req in {"4x2", "2wd"}:
+            axle = ["4X2"]
         body: dict[str, Any] = {
             "to": offset,
             "size": size,
@@ -135,8 +145,7 @@ class WeBuyCarsCollector(BaseCollector):
             "FuelType": None,
             "BodyType": None,
             "Gearbox": None,
-            # Hard buyer pref — API values are uppercase 4X4 / 4X2
-            "AxleConfiguration": ["4X4"],
+            "AxleConfiguration": axle,
             "Colour": None,
             "FinanceGrade": None,
             "Priced_Amount_Gte": 0,

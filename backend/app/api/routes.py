@@ -71,6 +71,7 @@ def api_vehicles(
     """
     if apply_defaults:
         params = default_buyer_filters(
+            db,
             min_price=min_price,
             max_price=max_price,
             min_mileage=min_mileage,

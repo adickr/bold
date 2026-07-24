@@ -67,16 +67,35 @@ def evaluate_listing(
 
     if drivetrain == "4x2":
         risks.append("4x2_drivetrain")
-        return CriteriaResult(False, reasons=["4x2_excluded"], risk_flags=risks, variant=variant)
+        # Only hard-exclude 4x2 when the active search requires 4x4
+        req = (settings.required_drivetrain or "").strip().lower().replace(" ", "")
+        if req in {"4x4", "4wd", "awd"}:
+            return CriteriaResult(False, reasons=["4x2_excluded"], risk_flags=risks, variant=variant)
+        if req in {"4x2", "2wd"}:
+            pass  # accepted below
+        # any / empty: keep going
 
-    # Hard buyer pref: only keep confirmed 4x4 (filter-chip noise must not invent it)
-    if drivetrain != "4x4":
-        return CriteriaResult(
-            False,
-            reasons=["drivetrain_unclear" if drivetrain is None else "non_4x4"],
-            risk_flags=risks + (["drivetrain_unclear"] if drivetrain is None else []),
-            variant=variant,
-        )
+    req = (settings.required_drivetrain or "").strip().lower().replace(" ", "")
+    if req in {"4x4", "4wd", "awd"}:
+        # Hard buyer pref: only keep confirmed 4x4 (filter-chip noise must not invent it)
+        if drivetrain != "4x4":
+            return CriteriaResult(
+                False,
+                reasons=["drivetrain_unclear" if drivetrain is None else "non_4x4"],
+                risk_flags=risks + (["drivetrain_unclear"] if drivetrain is None else []),
+                variant=variant,
+            )
+    elif req in {"4x2", "2wd"}:
+        if drivetrain == "4x4":
+            return CriteriaResult(False, reasons=["4x4_excluded"], risk_flags=risks, variant=variant)
+        if drivetrain != "4x2":
+            return CriteriaResult(
+                False,
+                reasons=["drivetrain_unclear" if drivetrain is None else "non_4x2"],
+                risk_flags=risks + (["drivetrain_unclear"] if drivetrain is None else []),
+                variant=variant,
+            )
+    # else: any drivetrain accepted
 
     price = listing.price_zar
     mileage = listing.mileage_km

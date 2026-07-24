@@ -2,7 +2,7 @@
 
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -50,3 +50,19 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+
+    # SQLite create_all does not ADD columns to existing tables
+    inspector = inspect(engine)
+    alterations = {
+        "collector_runs": [("criteria", "JSON")],
+        "market_snapshots": [("criteria_hash", "VARCHAR(32)")],
+    }
+    with engine.begin() as conn:
+        for table, cols in alterations.items():
+            if table not in inspector.get_table_names():
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table)}
+            for name, coltype in cols:
+                if name in existing:
+                    continue
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {coltype}"))

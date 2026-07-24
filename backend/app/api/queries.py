@@ -91,20 +91,25 @@ _WESTERN_CAPE_HINTS = (
 )
 
 
-def default_buyer_filters(**overrides: Any) -> VehicleFilterParams:
-    """Defaults for browsing: ≤100k km, 4x4, Western Cape, cheapest first."""
-    settings = get_settings()
-    data: dict[str, Any] = {
-        "max_mileage": settings.max_mileage_km,
-        "drivetrain": settings.required_drivetrain,
-        "province": settings.preferred_province,
-        "sort": settings.default_sort,
-        "active_only": True,
-    }
-    for key, value in overrides.items():
-        if value is not None:
-            data[key] = value
-    return VehicleFilterParams(**data)
+def default_buyer_filters(db: Session | None = None, **overrides: Any) -> VehicleFilterParams:
+    """Defaults for browsing — aligned with the active search profile when available."""
+    try:
+        from app.services.search_profile import active_buyer_filters
+
+        return active_buyer_filters(db=db, **overrides)
+    except Exception:
+        settings = get_settings()
+        data: dict[str, Any] = {
+            "max_mileage": settings.max_mileage_km,
+            "drivetrain": settings.required_drivetrain or None,
+            "province": settings.preferred_province or None,
+            "sort": settings.default_sort,
+            "active_only": True,
+        }
+        for key, value in overrides.items():
+            if value is not None:
+                data[key] = value
+        return VehicleFilterParams(**data)
 
 
 def location_matches_province(location: str | None, province: str | None) -> bool:
@@ -811,7 +816,7 @@ def dashboard_stats(db: Session) -> DashboardStats:
         .scalars()
         .all()
     )
-    matching = filter_vehicles(db, default_buyer_filters())
+    matching = filter_vehicles(db, default_buyer_filters(db))
     prices = [v.current_lowest_price for v in matching if v.current_lowest_price]
     price_entries: list[tuple[int, bool]] = []
     new_today = 0

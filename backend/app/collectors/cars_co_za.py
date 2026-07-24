@@ -61,16 +61,21 @@ class CarsCoZaCollector(BaseCollector):
     def build_search_params(self, page: int = 1) -> dict[str, Any]:
         """Exact filter set from the live WC · 4x4 · ≤100k Fortuner board."""
         mileage_hi = max(0, int(self.settings.max_mileage_km) - 1)
-        preferred = (self.settings.preferred_province or "").strip() or "Western Cape"
+        preferred = (self.settings.preferred_province or "").strip() or None
         params: dict[str, Any] = {
             "make_model_variant": "Toyota[Fortuner]",
             "sort": "sort_rank",
             "price_type": "listing_price",
-            "vfs_area": preferred,
             "vfs_mileage": f"0-{mileage_hi}",
-            "vehicle_axle_config": "4X4",
             "P": page,
         }
+        if preferred:
+            params["vfs_area"] = preferred
+        req = (self.settings.required_drivetrain or "").strip().lower().replace(" ", "")
+        if req in {"4x4", "4wd", "awd"}:
+            params["vehicle_axle_config"] = "4X4"
+        elif req in {"4x2", "2wd"}:
+            params["vehicle_axle_config"] = "4X2"
         if self.settings.enforce_max_price:
             params["price_to"] = self.settings.stretch_price_zar
         return params
@@ -340,12 +345,11 @@ class CarsCoZaCollector(BaseCollector):
         return None
 
     def _annotate(self, listings: list[ListingPayload]) -> list[ListingPayload]:
-        """Keep only cards with an explicit 4x4 signal in URL/title.
-
-        The live axle-filtered board should already be 4x4-only; this is the
-        hard gate so SEO-path leaks / Raised Body / mHev demos never land.
-        """
+        """Keep cards that match the active drivetrain requirement."""
         preferred = (self.settings.preferred_province or "").strip() or None
+        req = (self.settings.required_drivetrain or "").strip().lower().replace(" ", "")
+        require_4x4 = req in {"4x4", "4wd", "awd"}
+        require_4x2 = req in {"4x2", "2wd"}
         out: list[ListingPayload] = []
         dropped = 0
         for item in listings:
@@ -353,17 +357,25 @@ class CarsCoZaCollector(BaseCollector):
             detected = self._drivetrain_from_text(
                 data.get("url"), data.get("title"), data.get("variant_raw")
             )
-            if detected != "4x4":
+            if require_4x4 and detected != "4x4":
                 dropped += 1
                 continue
-            data["drivetrain"] = "4x4"
+            if require_4x2 and detected != "4x2":
+                dropped += 1
+                continue
+            if require_4x4:
+                data["drivetrain"] = "4x4"
+            elif require_4x2:
+                data["drivetrain"] = "4x2"
+            elif detected:
+                data["drivetrain"] = detected
             if preferred and not data.get("dealer_location"):
                 data["dealer_location"] = preferred
             elif preferred and preferred.lower() not in (data.get("dealer_location") or "").lower():
                 data["dealer_location"] = f"{data.get('dealer_location')}, {preferred}".strip(", ")
             out.append(ListingPayload.model_validate(data))
         if dropped:
-            logger.info("Cars.co.za: dropped %s non-explicit-4x4 card(s)", dropped)
+            logger.info("Cars.co.za: dropped %s card(s) outside drivetrain filter", dropped)
         return out
 
     def parse_api_json(self, data: Any) -> list[ListingPayload]:

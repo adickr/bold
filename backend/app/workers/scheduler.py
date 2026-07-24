@@ -28,9 +28,11 @@ _scheduler: BackgroundScheduler | None = None
 
 
 def run_collector(source: str) -> dict[str, Any]:
-    settings = get_settings()
+    from app.services.search_profile import settings_for_active_search
+
     db = SessionLocal()
     try:
+        settings = settings_for_active_search(db)
         ingestion = IngestionService(db, settings)
         collector = get_collector(source, settings=settings)
         with collector:
