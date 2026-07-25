@@ -272,33 +272,35 @@
   <div class="section-head">
     <div>
       <h2>Market snapshot</h2>
-      <p class="muted tiny">{{ search_profile.label if search_profile else 'Active search' }} — stock by asking-price band</p>
+      <p class="muted tiny">{{ search_profile.label if search_profile else 'Active search' }} — how stock moves day by day</p>
     </div>
   </div>
 
-  <div class="market-overview-top">
-    <p class="market-strip">
-      <span><strong class="mono" data-stat="active_matching">{{ stats.active_matching }}</strong> active</span>
-      <span class="fetch-sep">·</span>
-      <span><strong class="mono" data-stat="new_today">{{ stats.new_today }}</strong> new today</span>
-      <span class="fetch-sep">·</span>
-      <span><strong class="mono" data-stat="reductions_this_week">{{ stats.reductions_this_week }}</strong> cuts this week</span>
-      <span class="fetch-sep">·</span>
-      <span>median <strong class="mono" data-stat="median_asking_price">{{ stats.median_asking_price | zar }}</strong></span>
-    </p>
+  <p class="market-strip">
+    <span><strong class="mono" data-stat="active_matching">{{ stats.active_matching }}</strong> active</span>
+    <span class="fetch-sep">·</span>
+    <span><strong class="mono" data-stat="new_today">{{ stats.new_today }}</strong> new today</span>
+    <span class="fetch-sep">·</span>
+    <span><strong class="mono" data-stat="reductions_this_week">{{ stats.reductions_this_week }}</strong> cuts this week</span>
+    <span class="fetch-sep">·</span>
+    <span>median <strong class="mono" data-stat="median_asking_price">{{ stats.median_asking_price | zar }}</strong></span>
+  </p>
 
-    {% set mh = stats.market_history %}
-    <div class="market-spark" data-market-spark
-         data-history='{{ (mh or {}) | tojson | forceescape }}'>
-      <div class="spark-chart" data-spark-chart></div>
+  {% set mh = stats.market_history %}
+  <div class="stock-flow" data-market-spark data-stock-flow
+       data-history='{{ (mh or {}) | tojson | forceescape }}'>
+    <div class="stock-flow-head">
+      <p class="stock-flow-title">Listings over time</p>
       <p class="muted tiny" data-spark-label>
-        {% if mh and mh.known_points and mh.known_points < 2 %}
-          Today · {{ stats.active_matching }} active matches (trend builds daily)
-        {% else %}
-          {{ (mh.label if mh else 'Active matches · last 30 days') }}
-        {% endif %}
+        {% if mh and mh.label %}{{ mh.label }}{% else %}Active stock · new vs gone · last 30 days{% endif %}
       </p>
     </div>
+    <div class="stock-flow-legend" data-stock-legend>
+      <span class="leg active"><i></i> Active</span>
+      <span class="leg new"><i></i> New</span>
+      <span class="leg gone"><i></i> Gone</span>
+    </div>
+    <div class="spark-chart stock-flow-chart" data-spark-chart></div>
   </div>
 
   <div class="price-legend" data-price-legend>

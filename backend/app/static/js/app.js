@@ -138,62 +138,136 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     if (!chart) return;
 
     const points = (history && history.points) || [];
-    const known = points
-      .map((p, idx) => ({ idx, value: p.active_count, date: p.date }))
-      .filter((p) => p.value != null);
-    if (!known.length) {
-      if (label) label.textContent = "Active matches · history builds daily";
-      chart.innerHTML = `<p class="spark-empty">No market snapshots yet — run a collect to start the trend.</p>`;
+    if (!points.length) {
+      if (label) label.textContent = "Stock flow · run a collect to start";
+      chart.innerHTML = `<p class="spark-empty">No listing history yet — collect to track new and gone cars.</p>`;
       return;
     }
 
-    const values = known.map((p) => Number(p.value));
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const pad = max === min ? Math.max(2, Math.round(max * 0.05) || 2) : 0;
-    const lo = min - pad;
-    const hi = max + pad || 1;
-    const w = 280;
-    const h = 64;
-    const left = 2;
-    const right = 2;
-    const top = 6;
-    const bottom = 6;
-    const innerW = w - left - right;
-    const innerH = h - top - bottom;
-    const n = Math.max(points.length - 1, 1);
-
-    function xy(idx, value) {
-      const x = left + (idx / n) * innerW;
-      const y = top + innerH - ((value - lo) / (hi - lo || 1)) * innerH;
-      return [x, y];
+    const actives = points.map((p) => (p.active_count == null ? null : Number(p.active_count)));
+    const news = points.map((p) => Number(p.new_count || 0));
+    const gones = points.map((p) => Number(p.removed_count || 0));
+    const knownActive = actives.filter((v) => v != null);
+    const maxFlow = Math.max(1, ...news, ...gones);
+    const maxActive = Math.max(1, ...(knownActive.length ? knownActive : [0]));
+    const hasAny =
+      knownActive.length > 0 ||
+      news.some((n) => n > 0) ||
+      gones.some((n) => n > 0);
+    if (!hasAny) {
+      if (label) label.textContent = "Stock flow · history builds as you collect";
+      chart.innerHTML = `<p class="spark-empty">No listing history yet — collect to track new and gone cars.</p>`;
+      return;
     }
 
-    // One datapoint → flat line across the window so the chart still reads as a chart
-    const linePts = known.length === 1
-      ? [xy(0, known[0].value), xy(n, known[0].value)]
-      : known.map((p) => xy(p.idx, p.value));
-    const line = linePts.map((pt, i) => `${i === 0 ? "M" : "L"}${pt[0].toFixed(1)} ${pt[1].toFixed(1)}`).join(" ");
-    const first = linePts[0];
-    const last = linePts[linePts.length - 1];
-    const area = `${line} L${last[0].toFixed(1)} ${(top + innerH).toFixed(1)} L${first[0].toFixed(1)} ${(top + innerH).toFixed(1)} Z`;
-    const tip = linePts[linePts.length - 1];
-    const tipVal = values[values.length - 1];
-    const thinHistory = known.length < 2;
-    const title = thinHistory
-      ? `Today · ${tipVal} active`
-      : `${known[0].date} → ${known[known.length - 1].date}`;
+    const w = 640;
+    const h = 168;
+    const left = 28;
+    const right = 10;
+    const top = 10;
+    const midGap = 10;
+    const bottom = 22;
+    const activeH = 86;
+    const flowH = 40;
+    const innerW = w - left - right;
+    const n = Math.max(points.length, 1);
+    const slot = innerW / n;
+    const activeBase = top + activeH;
+    const flowZero = activeBase + midGap + flowH / 2;
+    const barMax = flowH / 2 - 2;
+
+    function xCenter(idx) {
+      return left + idx * slot + slot / 2;
+    }
+    function yActive(value) {
+      return top + activeH - (Number(value) / maxActive) * activeH;
+    }
+
+    const knownIdx = actives
+      .map((v, idx) => (v == null ? null : idx))
+      .filter((idx) => idx != null);
+    let line = "";
+    let area = "";
+    if (knownIdx.length) {
+      const coords = knownIdx.map((idx) => [xCenter(idx), yActive(actives[idx])]);
+      if (coords.length === 1) {
+        coords.unshift([left, coords[0][1]]);
+        coords.push([left + innerW, coords[0][1]]);
+      }
+      line = coords
+        .map((pt, i) => `${i === 0 ? "M" : "L"}${pt[0].toFixed(1)} ${pt[1].toFixed(1)}`)
+        .join(" ");
+      const first = coords[0];
+      const last = coords[coords.length - 1];
+      area = `${line} L${last[0].toFixed(1)} ${activeBase.toFixed(1)} L${first[0].toFixed(1)} ${activeBase.toFixed(1)} Z`;
+    }
+
+    const barW = Math.max(2, Math.min(8, slot * 0.28));
+    const bars = points
+      .map((p, idx) => {
+        const cx = xCenter(idx);
+        const newN = news[idx];
+        const goneN = gones[idx];
+        let html = "";
+        if (newN > 0) {
+          const bh = Math.max(2, (newN / maxFlow) * barMax);
+          html += `<rect class="flow-bar-new" x="${(cx - barW - 1).toFixed(1)}" y="${(flowZero - bh).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="1">
+            <title>${escapeHtml(p.date)} · +${newN} new</title></rect>`;
+        }
+        if (goneN > 0) {
+          const bh = Math.max(2, (goneN / maxFlow) * barMax);
+          html += `<rect class="flow-bar-gone" x="${(cx + 1).toFixed(1)}" y="${flowZero.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="1">
+            <title>${escapeHtml(p.date)} · ${goneN} gone</title></rect>`;
+        }
+        return html;
+      })
+      .join("");
+
+    const tipIdx = knownIdx.length ? knownIdx[knownIdx.length - 1] : points.length - 1;
+    const tipVal = actives[tipIdx];
+    const tip = tipVal == null ? null : [xCenter(tipIdx), yActive(tipVal)];
+    const totalNew = history && history.total_new != null
+      ? history.total_new
+      : news.reduce((a, b) => a + b, 0);
+    const totalGone = history && history.total_removed != null
+      ? history.total_removed
+      : gones.reduce((a, b) => a + b, 0);
+
+    // Date ticks: first, middle, last
+    const tickIdxs = [0, Math.floor((points.length - 1) / 2), points.length - 1]
+      .filter((v, i, arr) => arr.indexOf(v) === i);
+    const ticks = tickIdxs
+      .map((idx) => {
+        const d = points[idx] && points[idx].date ? points[idx].date.slice(5) : "";
+        return `<text class="flow-label" x="${xCenter(idx).toFixed(1)}" y="${(h - 6).toFixed(1)}" text-anchor="middle">${escapeHtml(d)}</text>`;
+      })
+      .join("");
+
+    const yTicks = [0, Math.round(maxActive / 2), maxActive]
+      .filter((v, i, arr) => arr.indexOf(v) === i)
+      .map((val) => {
+        const y = yActive(val);
+        return `<line class="flow-grid" x1="${left}" x2="${left + innerW}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"></line>
+          <text class="flow-label" x="${left - 4}" y="${(y + 3).toFixed(1)}" text-anchor="end">${val}</text>`;
+      })
+      .join("");
 
     if (label) {
-      label.textContent = thinHistory
-        ? `Today · ${tipVal} active matches (trend builds daily)`
-        : (history && history.label) || "Active matches · last 30 days";
+      label.textContent =
+        (history && history.label) ||
+        `+${totalNew} new · ${totalGone} gone · last ${points.length} days`;
     }
 
+    const title = `Active stock with +${totalNew} new and ${totalGone} gone`;
     chart.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(title)}">
-      <path class="spark-area" d="${area}"></path>
-      <path class="spark-line" d="${line}"></path>
-      <circle class="spark-dot" cx="${tip[0].toFixed(1)}" cy="${tip[1].toFixed(1)}" r="2.6"></circle>
+      ${yTicks}
+      <line class="flow-axis" x1="${left}" x2="${left + innerW}" y1="${activeBase.toFixed(1)}" y2="${activeBase.toFixed(1)}"></line>
+      <line class="flow-axis" x1="${left}" x2="${left + innerW}" y1="${flowZero.toFixed(1)}" y2="${flowZero.toFixed(1)}"></line>
+      ${area ? `<path class="spark-area" d="${area}"></path>` : ""}
+      ${line ? `<path class="spark-line" d="${line}"></path>` : ""}
+      ${tip ? `<circle class="spark-dot" cx="${tip[0].toFixed(1)}" cy="${tip[1].toFixed(1)}" r="2.8"></circle>` : ""}
+      ${bars}
+      ${ticks}
     </svg>`;
   }
 
