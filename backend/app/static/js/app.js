@@ -806,7 +806,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
   }
 
   if (form) {
-    form.addEventListener("submit", (event) => {
+    form.addEventListener("submit", async (event) => {
       const submitter = event.submitter;
       const action =
         submitter && submitter.getAttribute("name") === "action"
@@ -814,10 +814,15 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
           : form.matches("[data-collect-form]")
             ? "collect"
             : "save";
+      // Save search can use the normal form POST. Collect must not disable the
+      // submitter synchronously — that cancels the browser POST in Chrome/Safari.
       if (action !== "collect") return;
+
+      event.preventDefault();
       panel.classList.add("is-active");
       panel.dataset.autoPoll = "1";
       finishedHandled = false;
+      lastDoneSources = 0;
       if (messageEl) messageEl.textContent = "Starting live scan…";
       if (percentEl) percentEl.textContent = "2%";
       if (barEl) barEl.style.width = "2%";
@@ -825,8 +830,42 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
         btn.disabled = true;
         btn.textContent = "Scanning…";
       }
-      // Begin polling immediately; POST redirect will also land on ?scanning=1
-      setTimeout(poll, 400);
+
+      const data = new FormData(form);
+      data.set("action", "collect");
+      try {
+        const res = await fetch(form.getAttribute("action") || "/search-profile", {
+          method: "POST",
+          body: data,
+          credentials: "same-origin",
+          redirect: "follow",
+          headers: { Accept: "text/html" },
+        });
+        if (!res.ok && res.type !== "opaqueredirect") {
+          throw new Error(`collect start ${res.status}`);
+        }
+      } catch (_err) {
+        // Fallback: start collect without re-saving profile
+        try {
+          await fetch("/collect", {
+            method: "POST",
+            credentials: "same-origin",
+            redirect: "follow",
+            headers: { Accept: "text/html" },
+          });
+        } catch (_err2) {
+          if (messageEl) messageEl.textContent = "Could not start scan — try again";
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = collectBtnDefault;
+          }
+          return;
+        }
+      }
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState({}, "", "/?scanning=1");
+      }
+      poll();
     });
   }
 

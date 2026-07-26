@@ -37,8 +37,8 @@
       <p class="muted tiny search-profile-label">Active: <strong>{{ sp.label or '—' }}</strong>{% if saved %} · saved{% endif %}</p>
       <div class="search-profile-actions">
         <button type="submit" name="action" value="save" class="btn-ghost">Save search</button>
-        <button type="submit" name="action" value="collect" data-collect-btn {% if scanning %}disabled{% endif %}>
-          {% if scanning %}Scanning…{% else %}Save &amp; collect live{% endif %}
+        <button type="submit" name="action" value="collect" data-collect-btn {% if collect_status.running %}disabled{% endif %}>
+          {% if collect_status.running %}Scanning…{% else %}Save &amp; collect live{% endif %}
         </button>
       </div>
       <p class="muted tiny">Runs AutoTrader, Cars.co.za and WeBuyCars (often 2–5 minutes). Soft criteria (mileage) keep older rows when you tighten the search later.</p>
