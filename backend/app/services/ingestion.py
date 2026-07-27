@@ -155,14 +155,14 @@ class IngestionService:
             self.db.commit()
             raise
 
-    def record_parser_failure(self, source: str, message: str) -> None:
+    def record_parser_failure(self, source: str, message: str, *, parser_broken: bool = True) -> None:
         run = CollectorRun(
             source=source,
             started_at=_utcnow(),
             finished_at=_utcnow(),
             success=False,
             error_message=message,
-            parser_broken=True,
+            parser_broken=parser_broken,
         )
         self.db.add(run)
         self.db.commit()

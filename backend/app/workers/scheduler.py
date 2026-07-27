@@ -39,7 +39,9 @@ def run_collector(source: str) -> dict[str, Any]:
             try:
                 payloads = collector.collect()
             except CollectorError as exc:
-                ingestion.record_parser_failure(source, str(exc))
+                ingestion.record_parser_failure(
+                    source, str(exc), parser_broken=exc.parser_broken
+                )
                 return {"source": source, "success": False, "error": str(exc)}
             return ingestion.ingest_payloads(source, payloads)
     finally:

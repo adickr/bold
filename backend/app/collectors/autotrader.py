@@ -77,6 +77,7 @@ class AutoTraderCollector(BaseCollector):
         max_pages = max(1, self.settings.collector_max_pages)
         result_count: int | None = None
         page_count: int | None = None
+        site_unavailable = False
 
         # Prefer HTTP with the correct filter URL; fall back to Playwright when
         # HTTP is blocked or only returns a thin SSR slice of the result set.
@@ -85,7 +86,8 @@ class AutoTraderCollector(BaseCollector):
             if page_count is not None and page > page_count:
                 break
             url = f"{self.search_base_url()}?{urlencode(self.build_search_params(page))}"
-            page_listings, meta_rc, meta_pc = self._search_one_page_http_meta(url)
+            page_listings, meta_rc, meta_pc, unavailable = self._search_one_page_http_meta(url)
+            site_unavailable = site_unavailable or unavailable
             if meta_rc is not None:
                 result_count = meta_rc
             if meta_pc is not None:
@@ -126,7 +128,8 @@ class AutoTraderCollector(BaseCollector):
             reason = "blocked/empty" if not http_ok else f"thin HTTP ({len(all_listings)}/{result_count})"
             logger.info("AutoTrader escalating to Playwright (%s)", reason)
             try:
-                pw_listings = self._search_all_pages_playwright(max_pages)
+                pw_listings, pw_unavailable = self._search_all_pages_playwright(max_pages)
+                site_unavailable = site_unavailable or pw_unavailable
                 if len(pw_listings) > len(all_listings):
                     all_listings = pw_listings
             except Exception:
@@ -151,43 +154,80 @@ class AutoTraderCollector(BaseCollector):
         listings = [x for x in listings if self._is_plausible_card(x)]
         listings = self._annotate_search_scope(listings)
         if not listings:
+            if site_unavailable:
+                raise CollectorError(
+                    "AutoTrader: site unavailable (HTTP 503 / blocked for this IP). "
+                    "Open https://www.autotrader.co.za in a browser to confirm, then retry.",
+                    parser_broken=False,
+                )
             raise CollectorError("AutoTrader: no listings parsed", parser_broken=True)
         logger.info("AutoTrader collect finished with %s plausible listings", len(listings))
         return listings
 
+    @staticmethod
+    def _looks_unavailable(html: str | None, *, status: int | None = None) -> bool:
+        if status is not None and status >= 500:
+            return True
+        text = (html or "").lower()
+        if not text:
+            return False
+        if "server unavailable" in text:
+            return True
+        if "please check back later" in text and "autotrader" in text:
+            return True
+        if len(text) < 2000 and "your ip address is:" in text:
+            return True
+        return False
+
     def _search_one_page_http(self, url: str) -> list[ListingPayload]:
-        rows, _, _ = self._search_one_page_http_meta(url)
+        rows, _, _, _ = self._search_one_page_http_meta(url)
         return rows
 
     def _search_one_page_http_meta(
         self, url: str
-    ) -> tuple[list[ListingPayload], int | None, int | None]:
+    ) -> tuple[list[ListingPayload], int | None, int | None, bool]:
         try:
-            html = self.fetch_text(url)
+            self.throttle()
+            response = self.client.get(url)
+            html = response.text or ""
             self.snapshot_raw("search", html)
+            if self._looks_unavailable(html, status=response.status_code):
+                logger.warning(
+                    "AutoTrader HTTP unavailable (status=%s) for %s",
+                    response.status_code,
+                    url,
+                )
+                return [], None, None, True
+            if response.status_code >= 400:
+                logger.warning(
+                    "AutoTrader HTTP status %s for %s", response.status_code, url
+                )
+                return [], None, None, response.status_code >= 500
             if "just a moment" in html.lower() or len(html) < 5000:
                 logger.warning("AutoTrader HTTP page looks blocked/empty for %s", url)
-                return [], None, None
+                return [], None, None, False
             rc, pc = self._parse_result_meta(html)
-            return [x for x in self.parse_all(html) if self.is_detail_url(x.url)], rc, pc
+            return [x for x in self.parse_all(html) if self.is_detail_url(x.url)], rc, pc, False
         except Exception:
             logger.exception("AutoTrader HTTP search failed for %s", url)
-            return [], None, None
+            return [], None, None, False
 
-    def _search_all_pages_playwright(self, max_pages: int) -> list[ListingPayload]:
+    def _search_all_pages_playwright(self, max_pages: int) -> tuple[list[ListingPayload], bool]:
         """One browser session for all AutoTrader search pages (cards / embedded JSON)."""
         from app.collectors.browser import soft_goto
 
         all_listings: list[ListingPayload] = []
         result_count: int | None = None
         page_count: int | None = None
+        unavailable = False
         with browser_page() as page:
             for page_num in range(1, max_pages + 1):
                 if page_count is not None and page_num > page_count:
                     break
                 url = f"{self.search_base_url()}?{urlencode(self.build_search_params(page_num))}"
                 if page_num == 1:
-                    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    resp = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    status = resp.status if resp else None
                     try:
                         page.wait_for_load_state("networkidle", timeout=45000)
                     except Exception:
@@ -195,10 +235,15 @@ class AutoTraderCollector(BaseCollector):
                     page.wait_for_timeout(2000)
                 else:
                     soft_goto(page, url, timeout_ms=60000)
+                    status = None
                 page.mouse.wheel(0, 3500)
                 page.wait_for_timeout(800)
                 html = page.content()
                 self.snapshot_raw(f"search_rendered_p{page_num}", html)
+                if self._looks_unavailable(html, status=status):
+                    unavailable = True
+                    logger.warning("AutoTrader Playwright page looks unavailable (status=%s)", status)
+                    break
                 rc, pc = self._parse_result_meta(html)
                 if rc is not None:
                     result_count = rc
@@ -221,7 +266,7 @@ class AutoTraderCollector(BaseCollector):
                     break
                 if result_count is not None and len(all_listings) >= result_count:
                     break
-        return all_listings
+        return all_listings, unavailable
 
     def _listings_from_playwright_page(self, page: Any, html: str) -> list[ListingPayload]:
         listings = [x for x in self.parse_all(html) if self.is_detail_url(x.url)]
@@ -914,6 +959,46 @@ class AutoTraderCollector(BaseCollector):
         tail = path.rstrip("/").split("/")[-1]
         return tail if tail.isdigit() and len(tail) >= 6 else None
 
+    @staticmethod
+    def _slug_has_engine(slug: str | None) -> bool:
+        return bool(re.search(r"\d+\.\d+gd-?6|\bgd-?6\b|\d+\.\d+", (slug or "").lower()))
+
+    @classmethod
+    def _slug_from_url(cls, url: str | None) -> str | None:
+        path = urlparse(url or "").path.lower().rstrip("/")
+        m = re.search(r"/car-for-sale/toyota/fortuner/([^/]+)/(\d{6,})$", path)
+        return m.group(1) if m else None
+
+    @classmethod
+    def _merge_seo_slugs(cls, base: str | None, extra: str | None) -> str | None:
+        """Keep engine tokens from ``base``; append useful trim/axle bits from ``extra``."""
+        base = (base or "").strip("-").lower()
+        extra = (extra or "").strip("-").lower()
+        if not base and not extra:
+            return None
+        if not base:
+            return extra or None
+        if not extra:
+            return base
+        if not cls._slug_has_engine(extra) and cls._slug_has_engine(base):
+            # e.g. base=2.8gd-6 + extra=4x4-auto → 2.8gd-6-4x4-auto
+            parts = [base]
+            for token in extra.split("-"):
+                if not token or token in base:
+                    continue
+                if token in {"toyota", "fortuner"}:
+                    continue
+                parts.append(token)
+            return "-".join(parts)[:90]
+        # Prefer the candidate that keeps engine + more specificity
+        if cls._slug_has_engine(extra):
+            if cls._slug_has_engine(base) and len(base) > len(extra) and all(
+                t in base for t in extra.split("-") if t
+            ):
+                return base
+            return extra
+        return base
+
     @classmethod
     def _url_slug_score(cls, url: str | None) -> int:
         """Higher = more specific SEO slug. Short `/2.8gd-6/{id}` paths often 503."""
@@ -926,7 +1011,12 @@ class AutoTraderCollector(BaseCollector):
         for token in ("4x4", "4x2", "vx", "gr-s", "gr-sport", "legend", "raised-body", "auto"):
             if token in slug:
                 score += 8
-        # Bare engine-only slugs are weakest
+        if cls._slug_has_engine(slug):
+            score += 20
+        else:
+            # Drivetrain/trim-only slugs must never beat a short engine slug
+            score -= 40
+        # Bare engine-only slugs are weaker than engine+axle/trim
         if re.fullmatch(r"2[.\-]?[48]gd-?6", slug):
             score -= 20
         return score
@@ -938,6 +1028,8 @@ class AutoTraderCollector(BaseCollector):
             return None
         raw = text.lower()
         raw = re.sub(r"\btoyota\b|\bfortuner\b", " ", raw)
+        # Years belong in titles, not AT SEO slugs
+        raw = re.sub(r"\b20[0-2]\d\b", " ", raw)
         raw = re.sub(r"\bgr\s*sport\b", "gr-sport", raw)
         raw = re.sub(r"\bgr\s*s\b", "gr-s", raw)
         raw = re.sub(r"\braised\s*body\b", "raised-body", raw)
@@ -974,7 +1066,11 @@ class AutoTraderCollector(BaseCollector):
         title: str | None = None,
         listing_id: str | None = None,
     ) -> str | None:
-        """Upgrade short/broken AutoTrader slugs using variant text when available."""
+        """Upgrade short/broken AutoTrader slugs using variant text when available.
+
+        Never replace an engine-bearing slug with a drivetrain-only slug (that used
+        to make every card fail ``_is_plausible_card`` after collect).
+        """
         if not url:
             return None
         abs_url = url.split("?")[0]
@@ -983,12 +1079,17 @@ class AutoTraderCollector(BaseCollector):
         lid = listing_id or cls.listing_id_from_url(abs_url)
         if not lid:
             return abs_url
+        current_slug = cls._slug_from_url(abs_url)
         current_score = cls._url_slug_score(abs_url)
         # Already specific enough
-        if current_score >= 24:
+        if current_score >= 40:
             return abs_url
-        slug = cls.slug_from_variant(variant) or cls.slug_from_variant(title)
-        if not slug:
+        variant_slug = cls.slug_from_variant(variant) or cls.slug_from_variant(title)
+        slug = cls._merge_seo_slugs(current_slug, variant_slug)
+        if not slug or slug == current_slug:
+            return abs_url
+        # Refuse to drop engine evidence already present in the URL
+        if cls._slug_has_engine(current_slug) and not cls._slug_has_engine(slug):
             return abs_url
         improved = f"https://www.autotrader.co.za/car-for-sale/toyota/fortuner/{slug}/{lid}"
         if cls._url_slug_score(improved) > current_score:

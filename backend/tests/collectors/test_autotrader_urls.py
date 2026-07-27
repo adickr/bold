@@ -308,9 +308,9 @@ def test_autotrader_escalates_to_playwright_when_http_is_thin(monkeypatch):
     monkeypatch.setattr(
         c,
         "_search_one_page_http_meta",
-        lambda url: (thin if "pagenumber" not in url else [], 40, 3),
+        lambda url: (thin if "pagenumber" not in url else [], 40, 3, False),
     )
-    monkeypatch.setattr(c, "_search_all_pages_playwright", lambda max_pages: rich)
+    monkeypatch.setattr(c, "_search_all_pages_playwright", lambda max_pages: (rich, False))
     monkeypatch.setattr("app.collectors.autotrader.playwright_available", lambda: True)
 
     rows = c.search()
@@ -335,6 +335,38 @@ def test_autotrader_improves_short_seo_slug_from_variant():
     # Never emit the historical broken 2-4gd-6 shape
     assert "2-4" not in (AutoTraderCollector.slug_from_variant("2.4GD-6 4x4") or "")
 
+
+def test_autotrader_improve_keeps_engine_when_variant_is_axle_only():
+    """Regression: weak variants used to strip 2.8gd-6 → every card failed plausible."""
+    short = "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28575222"
+    improved = AutoTraderCollector.improve_detail_url(
+        short,
+        variant="4x4 Automatic",
+        title="Toyota Fortuner",
+        listing_id="28575222",
+    )
+    assert "2.8gd-6" in (improved or "")
+    assert improved.endswith("/2.8gd-6-4x4-auto/28575222")
+    # Chip titles must not invent a drivetrain-only slug that drops the engine
+    kept = AutoTraderCollector.improve_detail_url(
+        short,
+        variant="4x4",
+        title="4x4",
+        listing_id="28575222",
+    )
+    assert "2.8gd-6" in (kept or "")
+    assert kept != "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/4x4/28575222"
+    item = ListingPayload(
+        source="autotrader",
+        source_listing_id="28575222",
+        url=improved,
+        title="Toyota Fortuner",
+        variant_raw="4x4 Automatic",
+        make="Toyota",
+        model="Fortuner",
+        price_zar=700000,
+    )
+    assert AutoTraderCollector._is_plausible_card(item)
 
 def test_autotrader_outbound_normalise_upgrades_short_slug():
     from app.services.media import normalise_listing_url
