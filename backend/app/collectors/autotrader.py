@@ -205,8 +205,28 @@ class AutoTraderCollector(BaseCollector):
         rows = page.eval_on_selector_all(
             "a[href*='/car-for-sale/']",
             """els => els.map(a => {
-              const card = a.closest('article, li, div') || a.parentElement;
-              const text = card ? card.innerText : a.innerText;
+              let card = a.closest('article, li, [data-testid*="listing"], [data-testid*="result"]');
+              if (!card) {
+                // Walk up until a single detail-id card, never a multi-listing wrapper
+                let node = a.parentElement;
+                while (node && node !== document.body) {
+                  const hrefs = [...node.querySelectorAll("a[href*='/car-for-sale/']")]
+                    .map(x => (x.getAttribute('href') || ''))
+                    .filter(h => /\\/\\d{6,}\\/?$/.test(h.split('?')[0]));
+                  const ids = new Set(hrefs.map(h => (h.match(/(\\d{6,})\\/?$/) || [])[1]).filter(Boolean));
+                  if (ids.size === 1) { card = node; break; }
+                  if (ids.size > 1) break;
+                  node = node.parentElement;
+                }
+              }
+              if (!card) card = a.parentElement;
+              let text = card ? card.innerText : a.innerText;
+              if (card) {
+                const hrefs = [...card.querySelectorAll("a[href*='/car-for-sale/']")]
+                  .map(x => (x.getAttribute('href') || ''));
+                const ids = new Set(hrefs.map(h => (h.match(/(\\d{6,})\\/?$/) || [])[1]).filter(Boolean));
+                if (ids.size > 1) text = a.innerText || '';
+              }
               const img = card ? card.querySelector('img') : null;
               return {
                 href: a.href,
@@ -240,8 +260,8 @@ class AutoTraderCollector(BaseCollector):
                     url=href.split("?")[0],
                     title=title,
                     variant_raw=title,
-                    price_zar=self._extract_price(text),
-                    mileage_km=self._extract_mileage(text),
+                    price_zar=self._extract_price(text) if text.strip() else None,
+                    mileage_km=self._extract_mileage(text) if text.strip() else None,
                     year=self._extract_year(text) or self._extract_year(href),
                     dealer_location=self._location_from_text(text) or self._location_from_url(href),
                     drivetrain=self._resolve_drivetrain(href, compact, title),
@@ -267,45 +287,122 @@ class AutoTraderCollector(BaseCollector):
             self.snapshot_raw("search_rendered", html)
             return self._listings_from_playwright_page(page, html)
 
-    def parse_all(self, html: str) -> list[ListingPayload]:
-        # Embedded search JSON is richest (variant includes 4x4, price, km, dealer)
-        listings = self.parse_search_results_json(html)
-        if not listings:
-            listings = self.parse_search_html(html)
-        if not listings:
-            listings = self.parse_vehicle_data_blobs(html)
-        if not listings:
-            listings = self.parse_embedded_json(html)
-        return [x for x in listings if self.is_detail_url(x.url)]
-
-    def parse_search_results_json(self, html: str) -> list[ListingPayload]:
-        """Parse AutoTrader's embedded results.featuredTiles / listing JSON blobs."""
-        results: list[ListingPayload] = []
-        seen: set[str] = set()
-        for match in re.finditer(r'"listingId"\s*:\s*\d+', html or ""):
-            start = (html or "").rfind("{", 0, match.start())
-            if start < 0:
+    @staticmethod
+    def _merge_listing_payloads(primary: ListingPayload, secondary: ListingPayload) -> ListingPayload:
+        """Prefer richer fields; keep primary URL/id when both present."""
+        data = primary.model_dump()
+        other = secondary.model_dump()
+        for key in (
+            "title",
+            "variant_raw",
+            "price_zar",
+            "mileage_km",
+            "year",
+            "dealer_name",
+            "dealer_location",
+            "drivetrain",
+            "transmission",
+            "fuel_type",
+            "colour",
+            "image_urls",
+            "raw_payload",
+        ):
+            cur = data.get(key)
+            nxt = other.get(key)
+            if key == "image_urls":
+                if not cur and nxt:
+                    data[key] = nxt
                 continue
-            depth = 0
-            blob = ""
-            for i, ch in enumerate(html[start:], start):
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        blob = html[start : i + 1]
-                        break
+            if cur in (None, "", [], {}) and nxt not in (None, "", [], {}):
+                data[key] = nxt
+            elif key in {"title", "variant_raw"} and nxt and len(str(nxt)) > len(str(cur or "")):
+                data[key] = nxt
+        return ListingPayload.model_validate(data)
+
+    def parse_all(self, html: str) -> list[ListingPayload]:
+        """Union JSON + HTML parsers so dropped JSON tiles can still be recovered."""
+        by_id: dict[str, ListingPayload] = {}
+        for parser in (
+            self.parse_search_results_json,
+            self.parse_search_html,
+            self.parse_vehicle_data_blobs,
+            self.parse_embedded_json,
+        ):
+            for item in parser(html):
+                if not self.is_detail_url(item.url):
+                    continue
+                lid = item.source_listing_id
+                existing = by_id.get(lid)
+                if existing is None:
+                    by_id[lid] = item
+                else:
+                    # Embedded JSON is richest when present — prefer its fields
+                    if existing.raw_payload and not item.raw_payload:
+                        by_id[lid] = self._merge_listing_payloads(existing, item)
+                    elif item.raw_payload and not existing.raw_payload:
+                        by_id[lid] = self._merge_listing_payloads(item, existing)
+                    else:
+                        by_id[lid] = self._merge_listing_payloads(existing, item)
+        return list(by_id.values())
+
+    @staticmethod
+    def _balanced_json_object(html: str, start: int) -> str | None:
+        if start < 0 or start >= len(html) or html[start] != "{":
+            return None
+        depth = 0
+        in_string = False
+        escape = False
+        for i, ch in enumerate(html[start:], start):
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return html[start : i + 1]
+        return None
+
+    def _json_object_for_listing_id(self, html: str, needle_start: int, listing_id: str) -> dict[str, Any] | None:
+        """Walk brace opens backward until we get the object whose listingId matches."""
+        pos = needle_start + 1
+        while True:
+            start = html.rfind("{", 0, pos)
+            if start < 0:
+                return None
+            blob = self._balanced_json_object(html, start)
+            pos = start
             if not blob:
                 continue
             try:
                 data = json.loads(blob)
             except Exception:
                 continue
-            listing_id = str(data.get("listingId") or "")
-            path = data.get("canonicalUrl") or ""
-            if not listing_id or listing_id in seen:
+            if not isinstance(data, dict):
                 continue
+            if str(data.get("listingId") or "") == listing_id:
+                return data
+
+    def parse_search_results_json(self, html: str) -> list[ListingPayload]:
+        """Parse AutoTrader's embedded results.featuredTiles / listing JSON blobs."""
+        results: list[ListingPayload] = []
+        seen: set[str] = set()
+        for match in re.finditer(r'"listingId"\s*:\s*(\d+)', html or ""):
+            listing_id = match.group(1)
+            if listing_id in seen:
+                continue
+            data = self._json_object_for_listing_id(html or "", match.start(), listing_id)
+            if not data:
+                continue
+            path = data.get("canonicalUrl") or ""
             if not path:
                 continue
             if path.startswith("/"):
@@ -386,6 +483,32 @@ class AutoTraderCollector(BaseCollector):
             )
         return results
 
+    def _card_container_for_link(self, link) -> Any:
+        """Pick the tightest ancestor that contains only this listing's detail link."""
+        listing_id = self.listing_id_from_url(link.get("href") or "")
+        best = link
+        for parent in link.parents:
+            if getattr(parent, "name", None) not in {"div", "article", "li", "section"}:
+                continue
+            if not hasattr(parent, "select"):
+                break
+            ids: set[str] = set()
+            for anchor in parent.select("a[href*='/car-for-sale/']"):
+                href = anchor.get("href") or ""
+                if href.startswith("/"):
+                    href = f"https://www.autotrader.co.za{href}"
+                lid = self.listing_id_from_url(href.split("?")[0])
+                if lid:
+                    ids.add(lid)
+            if listing_id and listing_id in ids and len(ids) == 1:
+                best = parent
+                if parent.name in {"article", "li"}:
+                    break
+                continue
+            if len(ids) > 1:
+                break
+        return best
+
     def parse_search_html(self, html: str) -> list[ListingPayload]:
         soup = BeautifulSoup(html, "html.parser")
         # Only singular /car-for-sale/.../{id} detail links — never /cars-for-sale/ search links
@@ -406,26 +529,34 @@ class AutoTraderCollector(BaseCollector):
                 if not listing_id or listing_id in seen:
                     continue
                 seen.add(listing_id)
-                container = link.find_parent(["article", "li"]) or link.find_parent("div") or link.parent
-                # Prefer a compact card ancestor — huge wrappers include filter chips
-                if hasattr(container, "get_text") and len(container.get_text(" ", strip=True)) > 800:
-                    tighter = link.find_parent("article") or link.parent
-                    if tighter is not None:
-                        container = tighter
+                container = self._card_container_for_link(link)
                 title_el = None
                 if hasattr(container, "select_one"):
                     title_el = container.select_one("h2, h3, .title, [data-testid='listing-title']")
                 meta = (
                     container.get_text(" ", strip=True)
-                    if container is not None
+                    if container is not None and container is not link
                     else link.get_text(" ", strip=True)
                 )
                 # Cap meta so page-level filter chips don't dominate
                 if len(meta) > 500:
                     meta = meta[:500]
+                # If the chosen container still looks multi-card, fall back to link text only
+                if hasattr(container, "select"):
+                    sibling_ids = set()
+                    for anchor in container.select("a[href*='/car-for-sale/']"):
+                        ah = anchor.get("href") or ""
+                        if ah.startswith("/"):
+                            ah = f"https://www.autotrader.co.za{ah}"
+                        lid = self.listing_id_from_url(ah.split("?")[0])
+                        if lid:
+                            sibling_ids.add(lid)
+                    if len(sibling_ids) > 1:
+                        meta = link.get_text(" ", strip=True)
+                        title_el = None
                 price_el = (
                     container.select_one(".price, [data-testid='price']")
-                    if hasattr(container, "select_one")
+                    if hasattr(container, "select_one") and meta
                     else None
                 )
                 location_el = (

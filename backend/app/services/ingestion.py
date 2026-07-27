@@ -190,6 +190,29 @@ class IngestionService:
             self.db.add(listing)
             changed_fields = ["created"]
         else:
+            if self._looks_like_parse_flap(listing, payload):
+                logger.warning(
+                    "Ignoring parse flap for %s/%s (kept price=%s km=%s; saw price=%s km=%s)",
+                    payload.source,
+                    payload.source_listing_id,
+                    listing.price_zar,
+                    listing.mileage_km,
+                    payload.price_zar,
+                    payload.mileage_km,
+                )
+                # Keep trusted identity/ask; still refresh last_seen below
+                payload = payload.model_copy(
+                    update={
+                        "price_zar": listing.price_zar,
+                        "mileage_km": listing.mileage_km,
+                        "year": listing.year or payload.year,
+                        "title": listing.title or payload.title,
+                        "variant_raw": listing.variant_raw or payload.variant_raw,
+                        "dealer_name": listing.dealer_name or payload.dealer_name,
+                        "dealer_location": listing.dealer_location or payload.dealer_location,
+                        "drivetrain": listing.drivetrain or payload.drivetrain,
+                    }
+                )
             # Detect changes
             for field, new_val in [
                 ("price_zar", payload.price_zar),
@@ -830,6 +853,46 @@ class IngestionService:
         vehicle.total_reduction_zar = best_reduction
         vehicle.last_reduction_at = last_cut_at if best_reduction > 0 else None
 
+    def _looks_like_parse_flap(self, listing: SourceListing, payload: ListingPayload) -> bool:
+        """True when a collect looks like neighbour-card bleed, not a real update."""
+        old_price = listing.price_zar
+        new_price = payload.price_zar
+        if old_price is None or new_price is None:
+            return False
+        delta = abs(int(new_price) - int(old_price))
+        if delta < 50_000:
+            return False
+        relative = delta / max(int(old_price), 1)
+        if relative < 0.08:
+            return False
+
+        identity_jumps = 0
+        if listing.year and payload.year and int(listing.year) != int(payload.year):
+            identity_jumps += 1
+        old_km = listing.mileage_km
+        new_km = payload.mileage_km
+        if old_km is not None and new_km is not None:
+            km_delta = abs(int(new_km) - int(old_km))
+            if km_delta >= max(5_000, int(0.2 * int(old_km))):
+                identity_jumps += 1
+        old_blob = " ".join(filter(None, [listing.title, listing.variant_raw, listing.variant_normalised]))
+        new_blob = " ".join(filter(None, [payload.title, payload.variant_raw]))
+        if old_blob and new_blob:
+            from app.services.normalise import detect_engine
+
+            old_engine = detect_engine(old_blob)
+            new_engine = detect_engine(new_blob)
+            if old_engine and new_engine and old_engine != new_engine:
+                identity_jumps += 1
+            # Trim / special edition flip (e.g. GR-Sport ↔ VX) with a huge price move
+            old_l = old_blob.lower()
+            new_l = new_blob.lower()
+            for token in ("gr-s", "gr sport", "gr-sport", " vx", " legend"):
+                if (token in old_l) != (token in new_l):
+                    identity_jumps += 1
+                    break
+        return identity_jumps >= 1 and int(new_price) < int(old_price)
+
     def _listing_price_span(
         self, listing: SourceListing
     ) -> tuple[int | None, int | None, datetime | None]:
@@ -845,21 +908,58 @@ class IngestionService:
                 .scalars()
                 .all()
             )
-        priced: list[tuple[int, datetime | None]] = [
-            (o.price_zar, o.observed_at) for o in obs if o.price_zar is not None
+        priced: list[tuple[int, datetime | None, str | None]] = [
+            (o.price_zar, o.observed_at, o.title) for o in obs if o.price_zar is not None
         ]
         if listing.price_zar is not None:
             if not priced or priced[-1][0] != listing.price_zar:
-                priced.append((listing.price_zar, listing.last_seen_at))
+                priced.append((listing.price_zar, listing.last_seen_at, listing.title))
         if not priced:
             return None, None, None
-        first_price = priced[0][0]
-        current_price = priced[-1][0]
+
+        # Drop single-point parse flaps: A → B → A where |A-B| is huge.
+        cleaned: list[tuple[int, datetime | None, str | None]] = []
+        for idx, point in enumerate(priced):
+            price, when, title = point
+            prev = cleaned[-1][0] if cleaned else None
+            nxt = priced[idx + 1][0] if idx + 1 < len(priced) else None
+            if prev is not None and nxt is not None:
+                if abs(price - prev) >= 75_000 and abs(price - nxt) >= 75_000 and abs(prev - nxt) < 40_000:
+                    continue
+            cleaned.append(point)
+        if not cleaned:
+            cleaned = priced
+
+        if listing.price_zar is not None and cleaned[-1][0] != listing.price_zar:
+            cleaned.append((listing.price_zar, listing.last_seen_at, listing.title))
+
+        first_price, _, first_title = cleaned[0]
+        current_price, _, current_title = cleaned[-1]
+
+        # Fake discount: huge drop while the observation title/identity also jumped
+        if first_price > current_price and (first_price - current_price) >= 75_000:
+            from app.services.normalise import detect_engine
+
+            old_e = detect_engine(first_title or "")
+            new_e = detect_engine(current_title or "")
+            title_jump = bool(
+                first_title
+                and current_title
+                and first_title.strip().lower() != current_title.strip().lower()
+                and (
+                    (old_e and new_e and old_e != new_e)
+                    or ("gr" in (first_title or "").lower()) != ("gr" in (current_title or "").lower())
+                    or abs(len(first_title) - len(current_title)) > 12
+                )
+            )
+            if title_jump:
+                first_price = current_price
+
         cut_at = None
         if current_price < first_price:
-            for price, at in priced:
+            for price, when, _title in cleaned:
                 if price == current_price:
-                    cut_at = _aware(at)
+                    cut_at = when
                     break
         return first_price, current_price, cut_at
 

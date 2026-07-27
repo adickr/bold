@@ -165,6 +165,81 @@ def test_autotrader_parses_embedded_search_json():
     assert "Western Cape" in (annotated[0].dealer_location or "")
 
 
+def test_autotrader_json_handles_icons_before_listing_id():
+    """summaryIcons nested braces before listingId used to skip the whole tile."""
+    html = r"""
+    <html><body><script>
+    {"featuredTiles":[
+      {"summaryIcons":[
+         {"url":"/icons/mileage.svg","text":"15 159 km"},
+         {"url":"/icons/transmission-automatic.svg","text":"Automatic"}
+       ],
+       "listingId":28406720,
+       "canonicalUrl":"/car-for-sale/toyota/fortuner/2.8gd-6/28406720",
+       "make":"Toyota","model":"Fortuner",
+       "variant":"2.8GD-6 4x4 GR-Sport",
+       "makeModelLongVariant":"Toyota Fortuner 2.8GD-6 4x4 GR-Sport",
+       "dealerName":"Klein Karoo Toyota","dealerSuburbName":"Oudtshoorn",
+       "price":"R 884 999"},
+      {"listingId":28593847,
+       "canonicalUrl":"/car-for-sale/toyota/fortuner/2.8gd-6/28593847",
+       "make":"Toyota","model":"Fortuner","variant":"2.8GD-6 4x4",
+       "makeModelLongVariant":"2024 Toyota Fortuner 2.8GD-6 4x4 AT",
+       "summaryIcons":[{"url":"/icons/mileage.svg","text":"90 560 km"}],
+       "price":"R 629 000"}
+    ]}
+    </script></body></html>
+    """
+    c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
+    rows = {r.source_listing_id: r for r in c.parse_search_results_json(html)}
+    assert set(rows) == {"28406720", "28593847"}
+    assert rows["28406720"].price_zar == 884999
+    assert rows["28406720"].mileage_km == 15159
+    assert "GR-Sport" in (rows["28406720"].variant_raw or "")
+    assert rows["28593847"].price_zar == 629000
+
+
+def test_autotrader_html_does_not_bleed_neighbour_card_fields():
+    html = """
+    <html><body>
+    <div class="results-wrap">
+      <a href="/car-for-sale/toyota/fortuner/2.8gd-6/28406720">Toyota Fortuner 2.8GD-6 4x4 GR-Sport</a>
+      <span>R 884 999</span><span>15 159 km</span>
+      <a href="/car-for-sale/toyota/fortuner/2.8gd-6/28593847">2024 Toyota Fortuner 2.8GD-6 4x4 AT</a>
+      <span>R 629 000</span><span>90 560 km</span>
+    </div>
+    </body></html>
+    """
+    c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
+    rows = {r.source_listing_id: r for r in c.parse_search_html(html)}
+    assert "28406720" in rows
+    # Must not attach the neighbour's R629k / 90 560 km onto the GR-Sport URL
+    assert rows["28406720"].price_zar != 629000
+    assert rows["28406720"].mileage_km != 90560
+
+
+def test_autotrader_parse_all_unions_json_and_html():
+    html = r"""
+    <html><body><script>
+    {"featuredTiles":[
+      {"summaryIcons":[{"url":"/icons/mileage.svg","text":"15 159 km"}],
+       "listingId":28406720,
+       "canonicalUrl":"/car-for-sale/toyota/fortuner/2.8gd-6/28406720",
+       "make":"Toyota","model":"Fortuner","variant":"2.8GD-6 4x4 GR-Sport",
+       "makeModelLongVariant":"Toyota Fortuner 2.8GD-6 4x4 GR-Sport",
+       "price":"R 884 999"}
+    ]}
+    </script>
+    <a href="/car-for-sale/toyota/fortuner/2.8gd-6/28593847">2024 Toyota Fortuner 2.8GD-6 4x4 AT</a>
+    </body></html>
+    """
+    c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
+    rows = {r.source_listing_id: r for r in c.parse_all(html)}
+    assert "28406720" in rows
+    assert "28593847" in rows
+    assert rows["28406720"].price_zar == 884999
+
+
 def test_autotrader_location_from_card_text():
     assert "Brackenfell" in (AutoTraderCollector._location_from_text("Dealer in Brackenfell · R699 900") or "")
     assert AutoTraderCollector._location_from_text("Sandton dealership") is None

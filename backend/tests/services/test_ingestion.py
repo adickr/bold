@@ -129,6 +129,68 @@ def test_fake_reduction_from_price_spread_is_cleared(db_session):
     assert vehicle.current_lowest_price == 539900
 
 
+def test_autotrader_parse_flap_does_not_invent_discount(db_session):
+    """Neighbour-card bleed must not rewrite a GR-Sport into a cheaper VX with a fake cut."""
+    from datetime import datetime, timezone
+
+    from app.models.entities import CanonicalVehicle, ListingStatus, SourceListing
+    from app.schemas.listings import ListingPayload
+    from app.services.criteria import evaluate_listing
+
+    settings = get_settings()
+    service = IngestionService(db_session, settings)
+    now = datetime.now(timezone.utc)
+
+    good = ListingPayload(
+        source="autotrader",
+        source_listing_id="28406720",
+        url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28406720",
+        title="Toyota Fortuner 2.8GD-6 4x4 GR-Sport",
+        variant_raw="2.8GD-6 4x4 GR-Sport",
+        year=2025,
+        price_zar=884999,
+        mileage_km=15159,
+        drivetrain="4x4",
+        dealer_name="Klein Karoo Toyota",
+        dealer_location="Oudtshoorn, Western Cape",
+        make="Toyota",
+        model="Fortuner",
+    )
+    decision = evaluate_listing(good, settings)
+    assert decision.accepted
+    listing, _, _ = service._upsert_listing(good, decision)
+    vehicle = service._assign_canonical(listing)
+    db_session.commit()
+    assert listing.price_zar == 884999
+    assert vehicle.total_reduction_zar == 0
+
+    bleed = ListingPayload(
+        source="autotrader",
+        source_listing_id="28406720",
+        url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28406720",
+        title="2024 Toyota Fortuner 2.8 GD-6 4x4 AT",
+        variant_raw="2.8 GD-6 4x4 AT",
+        year=2024,
+        price_zar=629000,
+        mileage_km=90560,
+        drivetrain="4x4",
+        dealer_name="Klein Karoo Toyota",
+        dealer_location="Western Cape",
+        make="Toyota",
+        model="Fortuner",
+    )
+    decision2 = evaluate_listing(bleed, settings)
+    listing2, _, _ = service._upsert_listing(bleed, decision2)
+    service._assign_canonical(listing2)
+    db_session.commit()
+    db_session.refresh(listing2)
+    db_session.refresh(vehicle)
+
+    assert listing2.price_zar == 884999
+    assert listing2.mileage_km == 15159
+    assert vehicle.total_reduction_zar == 0
+
+
 def test_stale_price_event_does_not_invent_reduction(db_session):
     """A leftover PriceEvent without matching observation history is not a cut."""
     from datetime import datetime, timezone
