@@ -156,8 +156,10 @@ class AutoTraderCollector(BaseCollector):
         if not listings:
             if site_unavailable:
                 raise CollectorError(
-                    "AutoTrader: site unavailable (HTTP 503 / blocked for this IP). "
-                    "Open https://www.autotrader.co.za in a browser to confirm, then retry.",
+                    "AutoTrader: site unavailable (HTTP 503 / IP blocked). "
+                    "Same Wi‑Fi as this app is blocked — try a phone hotspot or VPN, "
+                    "confirm https://www.autotrader.co.za loads in a browser on that network, "
+                    "then Collect again. (CDP/headed Chrome will not help if the IP itself is blocked.)",
                     parser_broken=False,
                 )
             raise CollectorError("AutoTrader: no listings parsed", parser_broken=True)
