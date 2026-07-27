@@ -383,8 +383,9 @@ class IngestionService:
             elif url_dt == "4x4" or text_dt == "4x4":
                 drivetrain = "4x4"
             else:
-                # Clear stale search-scope 4x4 tags when URL/title never said 4x4
-                drivetrain = None
+                # Keep axle from the transmissiondrive=4x4 search collect.
+                # Clearing it made almost every /2.8gd-6/{id} card hard-reject.
+                drivetrain = listing.drivetrain
         return ListingPayload(
             source=listing.source,
             source_listing_id=listing.source_listing_id,

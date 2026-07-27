@@ -269,8 +269,8 @@ def test_stale_price_event_does_not_invent_reduction(db_session):
     assert vehicle.current_lowest_price == 779900
 
 
-def test_purge_removes_autotrader_without_explicit_4x4(db_session):
-    """AT /2.8gd-6/{id} with no 4x4 in title must leave the board."""
+def test_purge_keeps_autotrader_search_scoped_4x4(db_session):
+    """AT /2.8gd-6/{id} from a 4x4 search must not be wiped just because the slug omits 4x4."""
     from datetime import datetime, timezone
 
     from app.models.entities import CanonicalVehicle, ListingStatus, SourceListing
@@ -291,16 +291,63 @@ def test_purge_removes_autotrader_without_explicit_4x4(db_session):
     )
     db_session.add(vehicle)
     db_session.flush()
+    listing = SourceListing(
+        source="autotrader",
+        source_listing_id="28658500",
+        url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28658500",
+        title="2024 Toyota Fortuner 2.8GD-6 VX",
+        variant_raw="2.8GD-6 VX",
+        year=2024,
+        price_zar=669900,
+        mileage_km=18000,
+        drivetrain="4x4",
+        listing_status=ListingStatus.ACTIVE.value,
+        canonical_vehicle_id=vehicle.id,
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    db_session.add(listing)
+    db_session.commit()
+
+    removed = service._purge_listings_failing_criteria()
+    db_session.commit()
+    db_session.refresh(vehicle)
+    db_session.refresh(listing)
+    assert removed == 0
+    assert listing.listing_status == ListingStatus.ACTIVE.value
+    assert vehicle.is_active is True
+
+
+def test_purge_removes_autotrader_explicit_4x2(db_session):
+    from datetime import datetime, timezone
+
+    from app.models.entities import CanonicalVehicle, ListingStatus, SourceListing
+
+    settings = get_settings()
+    service = IngestionService(db_session, settings)
+    now = datetime.now(timezone.utc)
+    vehicle = CanonicalVehicle(
+        year=2019,
+        make="Toyota",
+        model="Fortuner",
+        drivetrain="4x4",
+        current_lowest_price=439900,
+        is_active=True,
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    db_session.add(vehicle)
+    db_session.flush()
     db_session.add(
         SourceListing(
             source="autotrader",
-            source_listing_id="28658500",
-            url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28658500",
-            title="2024 Toyota Fortuner 2.8GD-6 VX",
-            variant_raw="2.8GD-6 VX",
-            year=2024,
-            price_zar=669900,
-            mileage_km=18000,
+            source_listing_id="28658501",
+            url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6-4x2/28658501",
+            title="2019 Toyota Fortuner 2.4 GD-6 4x2",
+            variant_raw="2.4 GD-6 4x2",
+            year=2019,
+            price_zar=439900,
+            mileage_km=80000,
             drivetrain="4x4",
             listing_status=ListingStatus.ACTIVE.value,
             canonical_vehicle_id=vehicle.id,

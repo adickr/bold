@@ -78,8 +78,8 @@ class AutoTraderCollector(BaseCollector):
         result_count: int | None = None
         page_count: int | None = None
 
-        # Prefer HTTP with the correct filter URL; fall back to one Playwright session
-        # only when HTTP is blocked (503) or returns nothing.
+        # Prefer HTTP with the correct filter URL; fall back to Playwright when
+        # HTTP is blocked or only returns a thin SSR slice of the result set.
         http_ok = False
         for page in range(1, max_pages + 1):
             if page_count is not None and page > page_count:
@@ -115,9 +115,20 @@ class AutoTraderCollector(BaseCollector):
                 break
             # Do not stop just because a page has fewer than 8 cards — AT pages vary
 
-        if (not http_ok) and playwright_available() and self.settings.use_playwright:
+        thin_http = False
+        if http_ok:
+            if result_count is not None and len(all_listings) < max(8, int(result_count * 0.5)):
+                thin_http = True
+            elif result_count is None and len(all_listings) < 8:
+                thin_http = True
+        need_playwright = (not http_ok or thin_http) and playwright_available() and self.settings.use_playwright
+        if need_playwright:
+            reason = "blocked/empty" if not http_ok else f"thin HTTP ({len(all_listings)}/{result_count})"
+            logger.info("AutoTrader escalating to Playwright (%s)", reason)
             try:
-                all_listings = self._search_all_pages_playwright(max_pages)
+                pw_listings = self._search_all_pages_playwright(max_pages)
+                if len(pw_listings) > len(all_listings):
+                    all_listings = pw_listings
             except Exception:
                 logger.exception("AutoTrader Playwright search failed")
 
@@ -126,7 +137,7 @@ class AutoTraderCollector(BaseCollector):
         listings = self._annotate_search_scope(listings)
         if not listings:
             raise CollectorError("AutoTrader: no listings parsed", parser_broken=True)
-        logger.info("AutoTrader collect finished with %s plausible 4x4 listings", len(listings))
+        logger.info("AutoTrader collect finished with %s plausible listings", len(listings))
         return listings
 
     def _search_one_page_http(self, url: str) -> list[ListingPayload]:
@@ -717,12 +728,20 @@ class AutoTraderCollector(BaseCollector):
         return self._annotate_search_scope(self.parse_search_html(html))
 
     def _annotate_search_scope(self, listings: list[ListingPayload]) -> list[ListingPayload]:
-        """Keep cards that match the active drivetrain requirement."""
+        """Keep cards that match the active drivetrain requirement.
+
+        Live AutoTrader SEO slugs often omit `4x4` (e.g. `/2.8gd-6/{id}`) even when
+        the search was filtered with `transmissiondrive=4x4`. Trust that marketplace
+        filter unless the URL/title explicitly says 4x2.
+        """
         preferred = (self.settings.preferred_province or "").strip()
         is_wc = preferred.lower() in {"western cape", "wc", "western-cape"}
         req = (self.settings.required_drivetrain or "").strip().lower().replace(" ", "")
         require_4x4 = req in {"4x4", "4wd", "awd"}
         require_4x2 = req in {"4x2", "2wd"}
+        # We only add transmissiondrive=… when require_* is set (see build_search_params)
+        search_asserted_4x4 = require_4x4
+        search_asserted_4x2 = require_4x2
 
         out: list[ListingPayload] = []
         dropped = 0
@@ -745,15 +764,23 @@ class AutoTraderCollector(BaseCollector):
                 if url_dt == "4x2" or text_dt == "4x2":
                     dropped += 1
                     continue
-                if url_dt != "4x4" and text_dt != "4x4":
+                if url_dt == "4x4" or text_dt == "4x4":
+                    data["drivetrain"] = "4x4"
+                elif search_asserted_4x4:
+                    # Marketplace already filtered axle — keep the card
+                    data["drivetrain"] = "4x4"
+                else:
                     dropped += 1
                     continue
-                data["drivetrain"] = "4x4"
             elif require_4x2:
-                if detected != "4x2":
+                if url_dt == "4x4" or text_dt == "4x4":
                     dropped += 1
                     continue
-                data["drivetrain"] = "4x2"
+                if detected == "4x2" or search_asserted_4x2:
+                    data["drivetrain"] = "4x2"
+                else:
+                    dropped += 1
+                    continue
             elif detected:
                 data["drivetrain"] = detected
             if self._is_chip_title(data.get("title")):

@@ -111,8 +111,8 @@ def test_autotrader_keeps_4x4_from_variant_when_slug_omits():
     assert rows[0].drivetrain == "4x4"
 
 
-def test_autotrader_drops_when_url_and_title_lack_4x4():
-    """Knysna 28658500: /2.8gd-6/ + 'VX' with no 4x4 must not be assumed 4x4."""
+def test_autotrader_keeps_search_filtered_4x4_when_slug_omits():
+    """AT SEO often uses /2.8gd-6/{id}; trust transmissiondrive=4x4 search filter."""
     c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
     rows = c._annotate_search_scope(
         [
@@ -126,7 +126,27 @@ def test_autotrader_drops_when_url_and_title_lack_4x4():
                 mileage_km=18000,
                 make="Toyota",
                 model="Fortuner",
-                drivetrain="4x4",  # stale tag must not save it
+            )
+        ]
+    )
+    assert len(rows) == 1
+    assert rows[0].drivetrain == "4x4"
+
+
+def test_autotrader_still_drops_explicit_4x2_when_search_is_4x4():
+    c = AutoTraderCollector(settings=Settings(preferred_province="Western Cape"))
+    rows = c._annotate_search_scope(
+        [
+            ListingPayload(
+                source="autotrader",
+                source_listing_id="28658501",
+                url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6-4x2/28658501",
+                title="2019 Toyota Fortuner 2.4 GD-6 4x2",
+                variant_raw="2.4 GD-6 4x2",
+                price_zar=439900,
+                mileage_km=80000,
+                make="Toyota",
+                model="Fortuner",
             )
         ]
     )
@@ -238,6 +258,63 @@ def test_autotrader_parse_all_unions_json_and_html():
     assert "28406720" in rows
     assert "28593847" in rows
     assert rows["28406720"].price_zar == 884999
+
+
+def test_autotrader_escalates_to_playwright_when_http_is_thin(monkeypatch):
+    settings = Settings(
+        preferred_province="Western Cape",
+        max_mileage_km=100_000,
+        required_drivetrain="4x4",
+        use_playwright=True,
+        collector_max_pages=2,
+    )
+    c = AutoTraderCollector(settings=settings)
+    thin = [
+        ListingPayload(
+            source="autotrader",
+            source_listing_id="28000001",
+            url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6-4x4/28000001",
+            title="2022 Toyota Fortuner 2.8GD-6 4x4",
+            make="Toyota",
+            model="Fortuner",
+            price_zar=600000,
+            mileage_km=40000,
+        ),
+        ListingPayload(
+            source="autotrader",
+            source_listing_id="28000002",
+            url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6-4x4/28000002",
+            title="2023 Toyota Fortuner 2.8GD-6 4x4",
+            make="Toyota",
+            model="Fortuner",
+            price_zar=650000,
+            mileage_km=30000,
+        ),
+    ]
+    rich = thin + [
+        ListingPayload(
+            source="autotrader",
+            source_listing_id=str(28000000 + i),
+            url=f"https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6-4x4/{28000000 + i}",
+            title=f"2021 Toyota Fortuner 2.8GD-6 4x4 {i}",
+            make="Toyota",
+            model="Fortuner",
+            price_zar=500000 + i * 1000,
+            mileage_km=50000,
+        )
+        for i in range(3, 12)
+    ]
+
+    monkeypatch.setattr(
+        c,
+        "_search_one_page_http_meta",
+        lambda url: (thin if "pagenumber" not in url else [], 40, 3),
+    )
+    monkeypatch.setattr(c, "_search_all_pages_playwright", lambda max_pages: rich)
+    monkeypatch.setattr("app.collectors.autotrader.playwright_available", lambda: True)
+
+    rows = c.search()
+    assert len(rows) >= 10
 
 
 def test_autotrader_location_from_card_text():
