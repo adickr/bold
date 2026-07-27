@@ -319,4 +319,56 @@ def test_autotrader_escalates_to_playwright_when_http_is_thin(monkeypatch):
 
 def test_autotrader_location_from_card_text():
     assert "Brackenfell" in (AutoTraderCollector._location_from_text("Dealer in Brackenfell · R699 900") or "")
+
+
+def test_autotrader_improves_short_seo_slug_from_variant():
+    short = "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28575222"
+    improved = AutoTraderCollector.improve_detail_url(
+        short,
+        variant="2.8GD-6 4x4 VX",
+        listing_id="28575222",
+    )
+    assert improved == (
+        "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6-4x4-vx/28575222"
+    )
+    assert AutoTraderCollector.slug_from_variant("2.4 GD-6 4x4") == "2.4gd-6-4x4"
+    # Never emit the historical broken 2-4gd-6 shape
+    assert "2-4" not in (AutoTraderCollector.slug_from_variant("2.4GD-6 4x4") or "")
+
+
+def test_autotrader_outbound_normalise_upgrades_short_slug():
+    from app.services.media import normalise_listing_url
+
+    url = normalise_listing_url(
+        "autotrader",
+        "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28644715",
+        listing_id="28644715",
+        title="2024 Toyota Fortuner 2.8GD-6 4x4 Auto",
+        variant="2.8GD-6 4x4 Auto",
+    )
+    assert url.endswith("/2.8gd-6-4x4-auto/28644715")
+
+
+def test_autotrader_prefers_longer_dom_slug_when_merging():
+    short = ListingPayload(
+        source="autotrader",
+        source_listing_id="28575222",
+        url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6/28575222",
+        title="Toyota Fortuner 2.8GD-6 4x4 VX",
+        variant_raw="2.8GD-6 4x4 VX",
+        make="Toyota",
+        model="Fortuner",
+        price_zar=700000,
+        raw_payload={"listingId": 28575222},
+    )
+    long = ListingPayload(
+        source="autotrader",
+        source_listing_id="28575222",
+        url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6-4x4-vx/28575222",
+        title="Toyota Fortuner 2.8GD-6 4x4 VX",
+        make="Toyota",
+        model="Fortuner",
+    )
+    merged = AutoTraderCollector._merge_listing_payloads(short, long)
+    assert merged.url.endswith("/2.8gd-6-4x4-vx/28575222")
     assert AutoTraderCollector._location_from_text("Sandton dealership") is None

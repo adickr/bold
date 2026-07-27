@@ -133,6 +133,21 @@ class AutoTraderCollector(BaseCollector):
                 logger.exception("AutoTrader Playwright search failed")
 
         listings = [x for x in all_listings if self.is_detail_url(x.url)]
+        listings = [
+            ListingPayload.model_validate(
+                {
+                    **item.model_dump(),
+                    "url": self.improve_detail_url(
+                        item.url,
+                        variant=item.variant_raw,
+                        title=item.title,
+                        listing_id=item.source_listing_id,
+                    )
+                    or item.url,
+                }
+            )
+            for item in listings
+        ]
         listings = [x for x in listings if self._is_plausible_card(x)]
         listings = self._annotate_search_scope(listings)
         if not listings:
@@ -210,8 +225,43 @@ class AutoTraderCollector(BaseCollector):
 
     def _listings_from_playwright_page(self, page: Any, html: str) -> list[ListingPayload]:
         listings = [x for x in self.parse_all(html) if self.is_detail_url(x.url)]
+
+        # Browser card hrefs usually have the full SEO slug; JSON canonicalUrl is often
+        # the short `/2.8gd-6/{id}` form that 503s in a new tab.
+        dom_hrefs: dict[str, str] = {}
+        try:
+            rows = page.eval_on_selector_all(
+                "a[href*='/car-for-sale/']",
+                """els => els.map(a => ({ href: a.href || a.getAttribute('href') || '' }))""",
+            )
+            for row in rows or []:
+                href = ((row or {}).get("href") or "").split("?")[0]
+                if not self.is_detail_url(href):
+                    continue
+                lid = self.listing_id_from_url(href)
+                if not lid:
+                    continue
+                prev = dom_hrefs.get(lid)
+                if prev is None or self._url_slug_score(href) > self._url_slug_score(prev):
+                    dom_hrefs[lid] = href
+        except Exception:
+            logger.exception("AutoTrader DOM href scrape failed")
+
         if listings:
-            return listings
+            enriched: list[ListingPayload] = []
+            for item in listings:
+                href = dom_hrefs.get(item.source_listing_id)
+                data = item.model_dump()
+                if href and self._url_slug_score(href) >= self._url_slug_score(item.url or ""):
+                    data["url"] = href
+                data["url"] = self.improve_detail_url(
+                    data.get("url"),
+                    variant=data.get("variant_raw"),
+                    title=data.get("title"),
+                    listing_id=data.get("source_listing_id"),
+                ) or data.get("url")
+                enriched.append(ListingPayload.model_validate(data))
+            return [x for x in enriched if self._is_plausible_card(x)]
 
         rows = page.eval_on_selector_all(
             "a[href*='/car-for-sale/']",
@@ -264,11 +314,17 @@ class AutoTraderCollector(BaseCollector):
             compact = " ".join(
                 (self._title_from_text(text) or "", title, href)
             )[:200]
+            url = self.improve_detail_url(
+                href.split("?")[0],
+                variant=title,
+                title=title,
+                listing_id=listing_id,
+            ) or href.split("?")[0]
             results.append(
                 ListingPayload(
                     source=self.source,
                     source_listing_id=listing_id,
-                    url=href.split("?")[0],
+                    url=url,
                     title=title,
                     variant_raw=title,
                     price_zar=self._extract_price(text) if text.strip() else None,
@@ -300,7 +356,7 @@ class AutoTraderCollector(BaseCollector):
 
     @staticmethod
     def _merge_listing_payloads(primary: ListingPayload, secondary: ListingPayload) -> ListingPayload:
-        """Prefer richer fields; keep primary URL/id when both present."""
+        """Prefer richer fields; keep the more specific detail URL."""
         data = primary.model_dump()
         other = secondary.model_dump()
         for key in (
@@ -328,6 +384,13 @@ class AutoTraderCollector(BaseCollector):
                 data[key] = nxt
             elif key in {"title", "variant_raw"} and nxt and len(str(nxt)) > len(str(cur or "")):
                 data[key] = nxt
+        # Prefer the more specific SEO slug (short /2.8gd-6/{id} often 503s)
+        primary_url = data.get("url") or ""
+        secondary_url = other.get("url") or ""
+        if AutoTraderCollector._url_slug_score(secondary_url) > AutoTraderCollector._url_slug_score(
+            primary_url
+        ):
+            data["url"] = secondary_url
         return ListingPayload.model_validate(data)
 
     def parse_all(self, html: str) -> list[ListingPayload]:
@@ -851,6 +914,86 @@ class AutoTraderCollector(BaseCollector):
         tail = path.rstrip("/").split("/")[-1]
         return tail if tail.isdigit() and len(tail) >= 6 else None
 
+    @classmethod
+    def _url_slug_score(cls, url: str | None) -> int:
+        """Higher = more specific SEO slug. Short `/2.8gd-6/{id}` paths often 503."""
+        path = urlparse(url or "").path.lower().rstrip("/")
+        m = re.search(r"/car-for-sale/toyota/fortuner/([^/]+)/(\d{6,})$", path)
+        if not m:
+            return 0
+        slug = m.group(1)
+        score = len(slug)
+        for token in ("4x4", "4x2", "vx", "gr-s", "gr-sport", "legend", "raised-body", "auto"):
+            if token in slug:
+                score += 8
+        # Bare engine-only slugs are weakest
+        if re.fullmatch(r"2[.\-]?[48]gd-?6", slug):
+            score -= 20
+        return score
+
+    @classmethod
+    def slug_from_variant(cls, text: str | None) -> str | None:
+        """Build an AutoTrader SEO slug while preserving engine dots (2.8 not 2-8)."""
+        if not text:
+            return None
+        raw = text.lower()
+        raw = re.sub(r"\btoyota\b|\bfortuner\b", " ", raw)
+        raw = re.sub(r"\bgr\s*sport\b", "gr-sport", raw)
+        raw = re.sub(r"\bgr\s*s\b", "gr-s", raw)
+        raw = re.sub(r"\braised\s*body\b", "raised-body", raw)
+        raw = re.sub(r"\bgd\s*[- ]?\s*6\b", "gd-6", raw)
+        raw = re.sub(r"\bautomatic\b|\bauto\b", "auto", raw)
+        # AutoTrader slugs use 2.8gd-6 (no hyphen between engine and gd-6)
+        raw = re.sub(r"(\d+\.\d+)\s*-?\s*gd-6", r"\1gd-6", raw)
+        # Protect decimal engines before hyphenating (2.8 → keep dot)
+        engines: list[str] = []
+
+        def _protect_engine(match: re.Match[str]) -> str:
+            engines.append(match.group(0))
+            return f"engine{len(engines) - 1}"
+
+        # Protect full engine+gd token when present
+        raw = re.sub(r"\d+\.\d+gd-6", _protect_engine, raw)
+        raw = re.sub(r"\d+\.\d+", _protect_engine, raw)
+        raw = re.sub(r"[^a-z0-9]+", "-", raw)
+        for idx, engine in enumerate(engines):
+            raw = raw.replace(f"engine{idx}", engine)
+        raw = re.sub(r"-{2,}", "-", raw).strip("-")
+        if not raw or raw.isdigit():
+            return None
+        if not re.search(r"\d\.\d|gd-6|4x[24]|vx|gr|legend", raw):
+            return None
+        return raw[:90]
+
+    @classmethod
+    def improve_detail_url(
+        cls,
+        url: str | None,
+        *,
+        variant: str | None = None,
+        title: str | None = None,
+        listing_id: str | None = None,
+    ) -> str | None:
+        """Upgrade short/broken AutoTrader slugs using variant text when available."""
+        if not url:
+            return None
+        abs_url = url.split("?")[0]
+        if not cls.is_detail_url(abs_url):
+            return None
+        lid = listing_id or cls.listing_id_from_url(abs_url)
+        if not lid:
+            return abs_url
+        current_score = cls._url_slug_score(abs_url)
+        # Already specific enough
+        if current_score >= 24:
+            return abs_url
+        slug = cls.slug_from_variant(variant) or cls.slug_from_variant(title)
+        if not slug:
+            return abs_url
+        improved = f"https://www.autotrader.co.za/car-for-sale/toyota/fortuner/{slug}/{lid}"
+        if cls._url_slug_score(improved) > current_score:
+            return improved
+        return abs_url
 
     @classmethod
     def drivetrain_from_url(cls, url: str | None) -> str | None:

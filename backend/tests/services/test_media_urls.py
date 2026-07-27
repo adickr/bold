@@ -8,15 +8,16 @@ from app.services.media import (
 )
 
 
-def test_rebuild_autotrader_url_never_invents():
+def test_rebuild_autotrader_url_preserves_engine_dots():
     assert (
         rebuild_autotrader_url(
             "28638215",
             title="2023 Toyota Fortuner 2.4GD-6 4x4",
             variant="2.4GD-6 4x4",
         )
-        is None
+        == "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6-4x4/28638215"
     )
+    assert rebuild_autotrader_url("28638215", title="", variant="") is None
 
 
 def test_short_and_invented_autotrader_urls_are_invalid():
@@ -39,7 +40,8 @@ def test_short_and_invented_autotrader_urls_are_invalid():
     )
 
 
-def test_normalise_rejects_bad_autotrader_urls():
+def test_normalise_upgrades_or_rejects_autotrader_urls():
+    # Bare /car-for-sale/{id} can be rebuilt from variant (engine dots preserved).
     assert (
         normalise_listing_url(
             "autotrader",
@@ -48,7 +50,17 @@ def test_normalise_rejects_bad_autotrader_urls():
             title="2023 Toyota Fortuner 2.4GD-6 4x4",
             variant="2.4GD-6 4x4",
         )
-        is None
+        == "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6-4x4/28638215"
+    )
+    # Historical broken 2-4gd-6 is discarded, then rebuilt with engine dots from variant.
+    assert (
+        normalise_listing_url(
+            "autotrader",
+            "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2-4gd-6/28638215",
+            listing_id="28638215",
+            variant="2.4GD-6 4x4",
+        )
+        == "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6-4x4/28638215"
     )
     assert (
         normalise_listing_url(
@@ -58,6 +70,17 @@ def test_normalise_rejects_bad_autotrader_urls():
         )
         is None
     )
+    # Short SEO slug upgraded with drivetrain/trim from variant.
+    assert (
+        normalise_listing_url(
+            "autotrader",
+            "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6/28638215",
+            listing_id="28638215",
+            variant="2.4GD-6 4x4",
+        )
+        == "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6-4x4/28638215"
+    )
+    # Without variant, a valid short slug is left alone.
     assert (
         normalise_listing_url(
             "autotrader",
