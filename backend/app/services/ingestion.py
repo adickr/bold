@@ -128,6 +128,8 @@ class IngestionService:
 
             # Fix prior over-merges (same marketplace, different ads glued together)
             self._repair_same_source_merges()
+            # Then glue true cross-source duplicates that were born as separate cars
+            self._reconcile_cross_source_duplicates()
             self._purge_listings_failing_criteria()
             self._scrub_bogus_price_events()
             self._scrub_all_price_aggregates()
@@ -712,6 +714,162 @@ class IngestionService:
         if repaired:
             logger.info("Split %s falsely merged same-source listing(s)", repaired)
         return repaired
+
+    def _reconcile_cross_source_duplicates(self) -> int:
+        """Merge separate canonicals when soft signals prove the same physical car.
+
+        Listings that arrived on different collects often each get their own
+        canonical. ``_assign_canonical`` never reconsiders an existing link, so
+        identical AutoTrader + Cars.co.za dealer stock stays duplicated until
+        this pass.
+        """
+        listings = list(
+            self.db.execute(
+                select(SourceListing).where(
+                    SourceListing.canonical_vehicle_id.is_not(None),
+                    SourceListing.listing_status.in_(
+                        [
+                            ListingStatus.ACTIVE.value,
+                            ListingStatus.RELISTED.value,
+                            ListingStatus.POSSIBLY_REMOVED.value,
+                        ]
+                    ),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        merged = 0
+        # Bucket by year + rounded mileage to avoid O(n²) on large stock
+        buckets: dict[tuple[Any, ...], list[SourceListing]] = {}
+        for listing in listings:
+            year_key = listing.year or 0
+            mile_bucket = (listing.mileage_km // 500) if listing.mileage_km is not None else -1
+            keys = {(year_key, mile_bucket)}
+            if listing.mileage_km is not None:
+                keys.add((year_key, mile_bucket - 1))
+                keys.add((year_key, mile_bucket + 1))
+            for key in keys:
+                buckets.setdefault(key, []).append(listing)
+
+        seen_pairs: set[tuple[int, int]] = set()
+        redirect: dict[int, int] = {}
+
+        def _root(cid: int | None) -> int | None:
+            if cid is None:
+                return None
+            while cid in redirect:
+                cid = redirect[cid]
+            return cid
+
+        for group in buckets.values():
+            uniq: dict[int, SourceListing] = {x.id: x for x in group if x.id is not None}
+            rows = list(uniq.values())
+            for i, left in enumerate(rows):
+                for right in rows[i + 1 :]:
+                    if left.source == right.source:
+                        continue
+                    pair = tuple(sorted((left.id, right.id)))
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+                    left_cid = _root(left.canonical_vehicle_id)
+                    right_cid = _root(right.canonical_vehicle_id)
+                    if not left_cid or not right_cid or left_cid == right_cid:
+                        continue
+                    if left.year and right.year and abs(left.year - right.year) > 1:
+                        continue
+                    result = score_pair(left, right, self.settings)
+                    if not should_auto_merge(result, self.settings):
+                        continue
+                    target_v = self.db.get(CanonicalVehicle, left_cid)
+                    source_v = self.db.get(CanonicalVehicle, right_cid)
+                    if not target_v or not source_v:
+                        continue
+                    if (source_v.source_count or 0) > (target_v.source_count or 0) or (
+                        (source_v.source_count or 0) == (target_v.source_count or 0)
+                        and (source_v.id or 0) < (target_v.id or 0)
+                    ):
+                        target_v, source_v = source_v, target_v
+                    if not self._can_merge_canonicals(target_v, source_v):
+                        continue
+                    self._merge_canonical_vehicles(
+                        target_v,
+                        source_v,
+                        listing_a=left,
+                        listing_b=right,
+                        result=result,
+                    )
+                    redirect[source_v.id] = target_v.id
+                    merged += 1
+
+        if merged:
+            logger.info("Reconciled %s cross-source duplicate canonical pair(s)", merged)
+        return merged
+
+    def _can_merge_canonicals(
+        self, target: CanonicalVehicle, source: CanonicalVehicle
+    ) -> bool:
+        """Refuse merges that would glue distinct same-marketplace ads."""
+        self.db.flush()
+        linked = list(
+            self.db.execute(
+                select(SourceListing).where(
+                    SourceListing.canonical_vehicle_id.in_([target.id, source.id])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        by_source: dict[str, list[SourceListing]] = {}
+        for listing in linked:
+            by_source.setdefault(listing.source, []).append(listing)
+        for group in by_source.values():
+            if len(group) < 2:
+                continue
+            for i, a in enumerate(group):
+                for b in group[i + 1 :]:
+                    if a.source_listing_id == b.source_listing_id:
+                        continue
+                    if not strong_identity_match(a, b):
+                        return False
+        return True
+
+    def _merge_canonical_vehicles(
+        self,
+        target: CanonicalVehicle,
+        source: CanonicalVehicle,
+        *,
+        listing_a: SourceListing,
+        listing_b: SourceListing,
+        result: Any,
+    ) -> None:
+        moving = list(
+            self.db.execute(
+                select(SourceListing).where(SourceListing.canonical_vehicle_id == source.id)
+            )
+            .scalars()
+            .all()
+        )
+        move_ids = [x.id for x in moving if x.id is not None]
+        for listing in moving:
+            listing.canonical_vehicle_id = target.id
+        self._reattach_price_events(move_ids, target.id)
+        self.db.add(
+            DuplicateMatchEvidence(
+                canonical_vehicle_id=target.id,
+                listing_a_id=listing_a.id,
+                listing_b_id=listing_b.id,
+                score=result.score,
+                confidence=result.confidence,
+                evidence=result.evidence,
+            )
+        )
+        source.is_active = False
+        self.db.flush()
+        anchor = moving[0] if moving else listing_a
+        self._sync_canonical_from_listing(target, anchor)
+        target.duplicate_match_confidence = result.confidence
 
     def _scrub_all_price_aggregates(self) -> None:
         """Recompute original/reduction for every vehicle (clears merge pollution)."""

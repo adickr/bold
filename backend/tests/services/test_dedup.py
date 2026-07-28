@@ -58,20 +58,40 @@ def test_cross_source_still_merges_on_vin():
     assert should_auto_merge(result, Settings())
 
 
-def test_shared_stock_photos_alone_do_not_auto_merge():
+def test_cross_source_same_dealer_exact_mileage_auto_merges():
+    """AT + Cars.co.za: same dealer, year, variant, price, exact km → one car."""
     a = _listing(
         source="autotrader",
-        source_listing_id="AT1",
-        dealer_name="Dealer A",
-        image_urls=["https://cdn/stock1.jpg", "https://cdn/stock2.jpg"],
+        source_listing_id="28500001",
+        dealer_name="CFAO Mobility Toyota Tokai",
+        mileage_km=38622,
+        price_zar=579000,
+        year=2024,
+        variant_normalised="2.4 GD-6 4x4 AT",
+        drivetrain="4x4",
+        colour=None,
     )
     b = _listing(
         source="cars_co_za",
-        source_listing_id="C9",
-        dealer_name="Dealer B",
-        image_urls=["https://cdn/stock1.jpg", "https://cdn/stock2.jpg"],
-        year=2022,
-        variant_normalised="2.8 VX 4x4",
+        source_listing_id="C9001",
+        dealer_name="CFAO Mobility Toyota Tokai",
+        mileage_km=38622,
+        price_zar=579000,
+        year=2024,
+        variant_normalised="2.4 GD-6 4x4 AT",
+        drivetrain="4X4",
+        colour=None,
     )
     result = score_pair(a, b, Settings())
-    assert not should_auto_merge(result, Settings())
+    assert should_auto_merge(result, Settings())
+    assert result.score >= 75
+    signals = {s["signal"] for s in result.evidence["signals"]}
+    assert "same_dealer_exact_mileage" in signals
+
+
+def test_dealer_suffix_still_matches():
+    a = _listing(source="autotrader", source_listing_id="A1", dealer_name="Cape Gate Toyota (Pty) Ltd")
+    b = _listing(source="cars_co_za", source_listing_id="C1", dealer_name="Cape Gate Toyota")
+    result = score_pair(a, b, Settings())
+    assert any(s["signal"] == "same_dealer_exact_mileage" for s in result.evidence["signals"])
+    assert should_auto_merge(result, Settings())
