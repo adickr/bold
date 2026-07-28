@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -9,6 +10,7 @@ from rapidfuzz import fuzz
 
 from app.config import Settings, get_settings
 from app.models.entities import MatchConfidence, SourceListing
+from app.services.normalise import detect_drivetrain, normalise_colour
 
 
 @dataclass
@@ -29,6 +31,34 @@ def _norm_str(value: str | None) -> str | None:
     if not value:
         return None
     return " ".join(value.lower().split())
+
+
+def _norm_dealer(value: str | None) -> str | None:
+    """Collapse dealer names so slight legal/punctuation variants still match."""
+    s = _norm_str(value)
+    if not s:
+        return None
+    s = re.sub(r"[^\w\s]", " ", s)
+    s = re.sub(
+        r"\b(pty|ltd|limited|cc|inc|incorporated|t\/?a|trading as)\b",
+        " ",
+        s,
+    )
+    return " ".join(s.split()) or None
+
+
+def _norm_drivetrain(value: str | None) -> str | None:
+    if not value:
+        return None
+    detected = detect_drivetrain(value)
+    if detected:
+        return detected
+    compact = re.sub(r"[\s_\-]+", "", value.strip().lower())
+    if compact in {"4x4", "4wd", "awd"}:
+        return "4x4"
+    if compact in {"4x2", "2wd"}:
+        return "4x2"
+    return compact or None
 
 
 def _phash_similarity(a: list[Any] | None, b: list[Any] | None) -> float | None:
@@ -112,7 +142,7 @@ def score_pair(
         elif url_overlap == 1:
             add(15, "shared_image_url")
 
-    dealer_a, dealer_b = _norm_str(a.dealer_name), _norm_str(b.dealer_name)
+    dealer_a, dealer_b = _norm_dealer(a.dealer_name), _norm_dealer(b.dealer_name)
     if dealer_a and dealer_b and dealer_a == dealer_b:
         if a.mileage_km is not None and a.mileage_km == b.mileage_km:
             add(65, "same_dealer_exact_mileage")
@@ -130,7 +160,8 @@ def score_pair(
         else:
             add(10, "same_year")
 
-    colour_a, colour_b = _norm_str(a.colour), _norm_str(b.colour)
+    colour_a = normalise_colour(a.colour) or _norm_str(a.colour)
+    colour_b = normalise_colour(b.colour) or _norm_str(b.colour)
     if colour_a and colour_b:
         if colour_a == colour_b:
             add(10, "same_colour")
@@ -152,7 +183,8 @@ def score_pair(
     if phone_a and phone_b and phone_a == phone_b:
         add(15, "same_contact_number")
 
-    if a.drivetrain and b.drivetrain and a.drivetrain != b.drivetrain:
+    dt_a, dt_b = _norm_drivetrain(a.drivetrain), _norm_drivetrain(b.drivetrain)
+    if dt_a and dt_b and dt_a != dt_b:
         add(-100, "conflicting_drivetrain")
 
     if a.description and b.description:

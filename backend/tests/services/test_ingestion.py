@@ -469,6 +469,96 @@ def test_repair_splits_same_source_over_merge(db_session):
     assert all(cid is not None for cid in canonical_ids)
 
 
+def test_reconcile_merges_split_cross_source_duplicates(db_session):
+    """Same dealer/price/km on AT + Cars must collapse after reconcile."""
+    from sqlalchemy import select
+
+    from app.models.entities import CanonicalVehicle, ListingStatus, SourceListing
+
+    settings = get_settings()
+    service = IngestionService(db_session, settings)
+
+    at_vehicle = CanonicalVehicle(
+        year=2024,
+        make="Toyota",
+        model="Fortuner",
+        variant_normalised="2.4 GD-6 4x4 AT",
+        drivetrain="4x4",
+        current_lowest_price=579000,
+        source_count=1,
+        is_active=True,
+    )
+    cars_vehicle = CanonicalVehicle(
+        year=2024,
+        make="Toyota",
+        model="Fortuner",
+        variant_normalised="2.4 GD-6 4x4 AT",
+        drivetrain="4x4",
+        current_lowest_price=579000,
+        source_count=1,
+        is_active=True,
+    )
+    db_session.add_all([at_vehicle, cars_vehicle])
+    db_session.flush()
+
+    db_session.add(
+        SourceListing(
+            source="autotrader",
+            source_listing_id="28575299",
+            url="https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6-4x4/28575299",
+            title="2024 Toyota Fortuner 2.4GD-6 4x4",
+            year=2024,
+            make="Toyota",
+            model="Fortuner",
+            variant_normalised="2.4 GD-6 4x4 AT",
+            drivetrain="4x4",
+            price_zar=579000,
+            mileage_km=38622,
+            dealer_name="CFAO Mobility Toyota Tokai",
+            dealer_location="Cape Town, Western Cape",
+            listing_status=ListingStatus.ACTIVE.value,
+            canonical_vehicle_id=at_vehicle.id,
+        )
+    )
+    db_session.add(
+        SourceListing(
+            source="cars_co_za",
+            source_listing_id="8123456",
+            url="https://www.cars.co.za/for-sale/used/toyota-fortuner/8123456/",
+            title="2024 Toyota Fortuner 2.4GD-6 4x4",
+            year=2024,
+            make="Toyota",
+            model="Fortuner",
+            variant_normalised="2.4 GD-6 4x4 AT",
+            drivetrain="4X4",
+            price_zar=579000,
+            mileage_km=38622,
+            dealer_name="CFAO Mobility Toyota Tokai",
+            dealer_location="Western Cape",
+            listing_status=ListingStatus.ACTIVE.value,
+            canonical_vehicle_id=cars_vehicle.id,
+        )
+    )
+    db_session.commit()
+
+    merged = service._reconcile_cross_source_duplicates()
+    db_session.commit()
+    assert merged == 1
+
+    rows = db_session.execute(select(SourceListing)).scalars().all()
+    assert len({x.canonical_vehicle_id for x in rows}) == 1
+    survivor = db_session.get(CanonicalVehicle, rows[0].canonical_vehicle_id)
+    assert survivor is not None
+    assert survivor.source_count == 2
+    assert survivor.is_active is True
+    orphan = db_session.get(
+        CanonicalVehicle,
+        at_vehicle.id if rows[0].canonical_vehicle_id != at_vehicle.id else cars_vehicle.id,
+    )
+    assert orphan is not None
+    assert orphan.is_active is False
+
+
 def test_ingestion_dedup_and_price_history(db_session):
     settings = get_settings()
     service = IngestionService(db_session, settings)
