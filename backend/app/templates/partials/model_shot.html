@@ -1,0 +1,67 @@
+{# Colour-matched Fortuner catalog illustration. Not a photo of the listed car. #}
+<figure class="model-shot" style="--paint: {{ shot.paint }}; --paint-shadow: {{ shot.paint_shadow }}; --paint-highlight: {{ shot.paint_highlight }};">
+  <svg class="model-svg" viewBox="0 0 800 520" role="img" aria-label="{{ shot.caption }}">
+    <defs>
+      <linearGradient id="ms-body" x1="18%" y1="8%" x2="78%" y2="92%">
+        <stop offset="0%" stop-color="var(--paint-highlight)" />
+        <stop offset="42%" stop-color="var(--paint)" />
+        <stop offset="100%" stop-color="var(--paint-shadow)" />
+      </linearGradient>
+      <linearGradient id="ms-side" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="var(--paint)" />
+        <stop offset="100%" stop-color="var(--paint-shadow)" />
+      </linearGradient>
+      <linearGradient id="ms-glass" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#d7e4ea" stop-opacity="0.55" />
+        <stop offset="45%" stop-color="#1a2428" stop-opacity="0.92" />
+        <stop offset="100%" stop-color="#0c1214" />
+      </linearGradient>
+      <radialGradient id="ms-shadow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#000" stop-opacity="0.45" />
+        <stop offset="100%" stop-color="#000" stop-opacity="0" />
+      </radialGradient>
+    </defs>
+    <ellipse cx="400" cy="468" rx="290" ry="24" fill="url(#ms-shadow)" />
+    <!-- body -->
+    <path fill="url(#ms-body)" d="M148 318c8-46 28-78 78-98l168-52c38-12 72-14 118-8l92 16c36 6 62 22 78 48l28 52c8 18 18 28 38 32l14 4v46c0 16-10 28-26 28h-28c-6 22-28 38-54 38s-48-16-54-38H352c-6 22-28 38-54 38s-48-16-54-38H168c-18 0-28-14-26-30l6-68z" />
+    <path fill="url(#ms-side)" opacity="0.55" d="M214 236l156-48c22-6 48-8 78-4l-12 132H230c-10 0-16-8-14-18l-2-62z" />
+    <!-- belt / cladding -->
+    <path fill="#1b2220" opacity="0.88" d="M156 338h500c18 2 28 8 36 16v28H168l-12-44z" />
+    <path fill="#2a3330" d="M168 368h512v18c0 6-4 10-10 10H178c-8 0-12-4-12-12l2-16z" />
+    <!-- greenhouse -->
+    <path fill="url(#ms-glass)" d="M248 214l142-44c28-8 58-8 92-2l54 12-8 78H256c-12 0-16-8-14-16l6-28z" />
+    <path fill="#0e1412" opacity="0.35" d="M392 172v86h148l6-72-42-10c-36-8-72-8-112-4z" />
+    <path stroke="#0b100e" stroke-width="5" fill="none" d="M390 174v86" />
+    <path stroke="#0b100e" stroke-width="5" fill="none" d="M292 186v74" />
+    <!-- roof rails -->
+    <path fill="#c9d0cc" d="M268 168h248c8 0 12 3 12 8v4c0 3-3 5-8 5H274c-6 0-10-2-10-6v-5c0-4 2-6 4-6z" />
+    <rect x="286" y="160" width="8" height="12" rx="2" fill="#9aa39c" />
+    <rect x="486" y="160" width="8" height="12" rx="2" fill="#9aa39c" />
+    <!-- hood crease -->
+    <path fill="none" stroke="var(--paint-highlight)" stroke-opacity="0.35" stroke-width="3" d="M548 214c28 8 58 22 78 48" />
+    <!-- grille / lamps -->
+    <path fill="#111618" d="M628 268c18 8 32 22 40 38l8 16h-86c-4-18 2-36 14-48l24-6z" />
+    <path fill="#e8c56a" d="M636 278c12 6 22 16 28 28h-44c-2-12 4-22 16-28z" />
+    <path fill="#f3f6f4" opacity="0.85" d="M618 274c8 4 12 12 14 20h-22c0-8 2-16 8-20z" />
+    <path fill="#c4a35a" d="M668 318h18v8h-18z" />
+    <!-- side steps -->
+    <path fill="#8b9490" d="M214 386h300c8 0 12 3 12 8v6H208c-4 0-6-3-6-6 0-5 4-8 12-8z" />
+    <!-- wheels -->
+    <g class="ms-wheel" transform="translate(298 402)">
+      <circle r="46" fill="#121614" />
+      <circle r="38" fill="#2a302c" />
+      <circle r="18" fill="#6b746e" />
+      <circle r="8" fill="#1a1e1c" />
+    </g>
+    <g class="ms-wheel" transform="translate(596 402)">
+      <circle r="46" fill="#121614" />
+      <circle r="38" fill="#2a302c" />
+      <circle r="18" fill="#6b746e" />
+      <circle r="8" fill="#1a1e1c" />
+    </g>
+    <!-- door cuts -->
+    <path fill="none" stroke="#0b100e" stroke-opacity="0.35" stroke-width="2" d="M318 236v128" />
+    <path fill="none" stroke="#0b100e" stroke-opacity="0.35" stroke-width="2" d="M430 228v136" />
+  </svg>
+  <figcaption>{{ shot.caption }}</figcaption>
+</figure>

@@ -15,6 +15,8 @@ from app.schemas.listings import DashboardStats, VehicleFilterParams
 from app.services.media import absolute_url, is_valid_marketplace_url, normalise_listing_url, source_label
 from app.services.market_snapshot import build_market_history
 from app.services.normalise import colour_swatch_css
+from app.services.scoring import with_score_inputs
+from app.services.stock import model_shot
 
 # Towns/areas commonly listed without "Western Cape" in the location string.
 _WESTERN_CAPE_HINTS = (
@@ -288,10 +290,12 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
         "days_tracked": v.days_tracked,
         "total_reduction": v.total_reduction_zar,
         "deal_score": v.deal_score,
-        "deal_score_breakdown": v.deal_score_breakdown,
+        "deal_score_breakdown": with_score_inputs(v, v.deal_score_breakdown, kind="deal"),
         "motivation_score": v.motivation_score,
         "motivation_level": v.motivation_level,
-        "motivation_breakdown": v.motivation_breakdown,
+        "motivation_breakdown": with_score_inputs(
+            v, v.motivation_breakdown, kind="motivation"
+        ),
         "source_count": v.source_count,
         "shortlist_status": shortlist.status if shortlist else None,
         "vote": vote_from_shortlist(shortlist),
@@ -306,6 +310,7 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
         "drivetrain": v.drivetrain,
         "colour": v.colour,
         "colour_css": colour_swatch_css(v.colour),
+        "model_shot": model_shot(v),
         "engine": v.engine,
         "confirmed": ["price", "mileage", "source_links"],
         "inferred": ["deal_score", "motivation_score", "comparable_stats"],

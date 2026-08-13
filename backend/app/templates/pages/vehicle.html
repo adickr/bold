@@ -1,27 +1,73 @@
 {% extends "partials/base.html" %}
 {% block title %}{{ v.year }} {{ v.variant_normalised }} · Fortuner Agent{% endblock %}
 {% block content %}
-{% from "partials/score_widgets.html" import deal_score_widget, motivation_widget %}
-<section class="detail-hero">
+{% from "partials/score_widgets.html" import deal_score_widget, motivation_widget, score_breakdown %}
+{% set deal_bd = summary.deal_score_breakdown %}
+{% set mot_bd = summary.motivation_breakdown %}
+{% set images = summary.images or [] %}
+{% set shot = summary.model_shot %}
+<p class="crumb"><a href="/listings">← Listings</a></p>
+<section class="detail-hero has-media" data-vehicle-vote data-vote="{{ summary.vote or '' }}">
+  <div class="detail-media">
+    {% include "partials/model_shot.html" %}
+    {% if images %}
+    <div class="listing-photos" data-gallery>
+      <p class="listing-photos-label">From the listing <span>this car, if the ad photos loaded</span></p>
+      <div class="detail-thumbs" role="list">
+        {% for src in images %}
+        <a class="detail-thumb" href="{{ src }}" target="_blank" rel="noopener noreferrer" aria-label="Listing photo {{ loop.index }}">
+          <img src="{{ src }}" alt="" />
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
   <div class="detail-copy">
-    <p class="eyebrow">{% if v.is_stretch_candidate %}Stretch candidate · {% endif %}{{ v.drivetrain or 'drivetrain unclear' }}</p>
+    <p class="eyebrow">
+      {% if not v.is_active %}<span class="tag is-gone">Gone</span> · {% endif %}
+      {% if v.is_stretch_candidate %}Stretch · {% endif %}
+      {{ v.drivetrain or 'drivetrain unclear' }}
+      {% if v.trim %} · {{ v.trim }}{% endif %}
+    </p>
     <h1>{{ v.year }} {{ v.variant_normalised or 'Fortuner' }}</h1>
     <p class="lede">{{ summary.dealer or 'Unknown dealer' }} · {{ summary.location or 'South Africa' }}</p>
     <div class="price-row">
       <strong>{{ summary.price | zar }}</strong>
-      <span>lowest ask across {{ summary.source_count }} source{{ 's' if summary.source_count != 1 else '' }}</span>
+      <span class="price-km">{% if summary.mileage %}{{ summary.mileage | km }}{% else %}Mileage unknown{% endif %}</span>
+    </div>
+    <div class="spec-strip">
+      {% if summary.colour %}
+      <span>
+        {% if summary.colour_css %}
+        <i class="colour-swatch" style="background: {{ summary.colour_css }}" aria-hidden="true"></i>
+        {% endif %}
+        {{ summary.colour }}
+      </span>
+      {% endif %}
+      {% if v.engine %}<span>{{ v.engine }}</span>{% endif %}
+      {% if v.transmission %}<span>{{ v.transmission }}</span>{% endif %}
+      <span>{{ summary.days_tracked }} days tracked</span>
+      {% if summary.total_reduction %}<span>−{{ summary.total_reduction | zar }} total cuts</span>{% endif %}
+      {% if summary.source_count %}
+      <span>{{ summary.source_count }} source{{ 's' if summary.source_count != 1 else '' }}</span>
+      {% endif %}
     </div>
     <div class="chip-row score-chips">
       <span class="chip-score">
-        {{ deal_score_widget(summary.deal_score, summary.deal_score_breakdown, 'md') }}
+        {{ deal_score_widget(summary.deal_score, deal_bd, 'md') }}
         <span class="chip-caption">Deal <i>(inferred)</i></span>
       </span>
       <span class="chip-score">
-        {{ motivation_widget(summary.motivation_level, summary.motivation_breakdown, 'md') }}
+        {{ motivation_widget(summary.motivation_level, mot_bd, 'md') }}
         <span class="chip-caption">Motivation <i>(estimate)</i></span>
       </span>
-      <span>{{ summary.days_tracked }} days tracked</span>
-      {% if summary.total_reduction %}<span>−{{ summary.total_reduction | zar }} total</span>{% endif %}
+      <span class="chip-score vote-on-detail">
+        <div class="vote-controls" data-vote-controls data-vehicle-id="{{ v.id }}">
+          <button type="button" class="vote-btn vote-up {% if summary.vote == 'up' %}is-active{% endif %}" data-vote="up" aria-label="Thumbs up" aria-pressed="{{ 'true' if summary.vote == 'up' else 'false' }}">👍</button>
+          <button type="button" class="vote-btn vote-down {% if summary.vote == 'down' %}is-active{% endif %}" data-vote="down" aria-label="Thumbs down" aria-pressed="{{ 'true' if summary.vote == 'down' else 'false' }}">👎</button>
+        </div>
+      </span>
     </div>
     <div class="actions" style="margin-top:1rem">
       {% set active_sources = summary.sources | selectattr('status', 'in', ['active', 'relisted']) | selectattr('url') | list %}
@@ -39,32 +85,66 @@
         <p class="risk">No working marketplace link for this vehicle yet — re-collect live listings.</p>
       {% endif %}
     </div>
+    {% if v.risk_flags %}
+    <p class="risk-flags">
+      {% for flag in v.risk_flags %}
+      <span class="risk-chip">{{ flag.replace('_', ' ') }}</span>
+      {% endfor %}
+    </p>
+    {% endif %}
   </div>
 </section>
 
 <div class="detail-grid">
   <section>
+    <h2>Facts</h2>
+    <dl class="facts-grid">
+      <div><dt>Year</dt><dd>{{ v.year or '—' }}</dd></div>
+      <div><dt>Mileage</dt><dd>{{ summary.mileage | km }}</dd></div>
+      <div><dt>Colour</dt><dd>{% if summary.colour_css %}<i class="colour-swatch" style="background: {{ summary.colour_css }}"></i> {% endif %}{{ summary.colour or '—' }}</dd></div>
+      <div><dt>Drivetrain</dt><dd>{{ v.drivetrain or '—' }}</dd></div>
+      <div><dt>Engine</dt><dd>{{ v.engine or '—' }}</dd></div>
+      <div><dt>Gearbox</dt><dd>{{ v.transmission or '—' }}</dd></div>
+      {% if v.fuel_type %}<div><dt>Fuel</dt><dd>{{ v.fuel_type }}</dd></div>{% endif %}
+      {% if v.trim %}<div><dt>Trim</dt><dd>{{ v.trim }}{% if v.special_edition %} · {{ v.special_edition }}{% endif %}</dd></div>{% endif %}
+      <div><dt>First seen</dt><dd>{{ v.first_seen_at | when }}</dd></div>
+      <div><dt>Last seen</dt><dd>{{ v.last_seen_at | when }}</dd></div>
+      {% if v.last_reduction_at %}<div><dt>Last cut</dt><dd>{{ v.last_reduction_at | when }}</dd></div>{% endif %}
+      {% if v.vin %}<div><dt>VIN</dt><dd class="mono">{{ v.vin }}</dd></div>{% endif %}
+      {% if v.registration %}<div><dt>Reg</dt><dd class="mono">{{ v.registration }}</dd></div>{% endif %}
+    </dl>
+  </section>
+
+  <section>
     <h2>Where it’s listed</h2>
     <ul class="source-list">
       {% for s in summary.sources %}
-      <li class="{% if s.status not in ['active', 'relisted'] %}muted{% endif %}">
+      <li class="{% if s.status not in ['active', 'relisted'] %}is-inactive{% endif %}">
         <div class="source-row">
           {% if s.url and s.status in ['active', 'relisted'] %}
             <a class="button-link" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">
-              View on {{ s.label }}
+              {{ s.label }}
             </a>
           {% else %}
-            <span class="button-link secondary">{{ s.label }}{% if s.status %} ({{ s.status.replace('_',' ') }}){% endif %}</span>
+            <span class="source-name">{{ s.label }}</span>
           {% endif %}
-          <span>{{ s.price | zar }} · {{ s.status.replace('_', ' ') if s.status else '—' }}</span>
+          <span class="source-meta">
+            {{ s.price | zar }}
+            <i class="source-status is-{{ (s.status or 'unknown')|replace('_','-') }}">{{ (s.status or '—')|replace('_',' ') }}</i>
+          </span>
         </div>
-        <div class="muted">{{ s.title }}</div>
-        {% if s.url %}
-          <div class="muted tiny">{{ s.url }}</div>
-        {% endif %}
+        {% if s.title %}<div class="muted tiny">{{ s.title }}</div>{% endif %}
       </li>
       {% endfor %}
     </ul>
+    {% if v.match_evidence %}
+    <p class="muted tiny source-match">
+      Cross-site match
+      {% set best = v.match_evidence|sort(attribute='score')|last %}
+      · {{ best.confidence }} confidence
+      {% if best.is_manual %} (manual){% endif %}
+    </p>
+    {% endif %}
   </section>
 
   <section class="price-history-panel" data-price-history>
@@ -80,14 +160,14 @@
       <ol class="timeline">
         {% for e in events %}
         <li>
-          <time datetime="{{ e.observed_at.isoformat() if e.observed_at else '' }}">{{ e.observed_at }}</time>
+          <time datetime="{{ e.observed_at.isoformat() if e.observed_at else '' }}">{{ e.observed_at | when }}</time>
           {% if e.old_price_zar is not none %}
             {{ e.old_price_zar | zar }} → {{ e.new_price_zar | zar }}
             <span class="change {% if e.change_zar < 0 %}is-cut{% elif e.change_zar > 0 %}is-hike{% endif %}">({{ e.change_zar | zar }})</span>
           {% else %}
             Initial {{ e.new_price_zar | zar }}
           {% endif %}
-          <span class="muted">{{ e.source }} · {{ e.note }}</span>
+          <span class="muted">{{ e.source }}{% if e.note %} · {{ e.note }}{% endif %}</span>
         </li>
         {% endfor %}
       </ol>
@@ -112,39 +192,32 @@
 
   <section>
     <h2>Deal score</h2>
+    <p class="score-caption">Points toward 100 from asking-price listings — not a confirmed sale.</p>
     {% if v.deal_score is not none %}
     <div class="score-panel-head">
-      {{ deal_score_widget(v.deal_score, v.deal_score_breakdown, 'lg') }}
-      <p class="muted tiny">Inferred from asking-price listings, not confirmed sales.</p>
+      {{ deal_score_widget(v.deal_score, deal_bd, 'lg') }}
     </div>
     {% endif %}
-    {% if v.deal_score_breakdown %}
-    <ul class="score-break">
-      {% for k, val in v.deal_score_breakdown.items() if k not in ['note', 'inferred'] %}
-      <li><span>{{ k.replace('_', ' ') }}</span><strong>{{ val }}</strong></li>
-      {% endfor %}
-    </ul>
-    <p class="muted tiny">{{ v.deal_score_breakdown.note }}</p>
+    {% if deal_bd %}
+    {{ score_breakdown(deal_bd, 'deal') }}
+    <p class="muted tiny">{{ deal_bd.note }}</p>
     {% elif v.deal_score is none %}<p class="muted">Not scored yet.</p>{% endif %}
   </section>
 
   <section>
     <h2>Motivation estimate</h2>
+    <p class="score-caption">Points toward 100 — not days on market or rands cut.</p>
     {% if v.motivation_level %}
     <div class="score-panel-head">
-      {{ motivation_widget(v.motivation_level, v.motivation_breakdown, 'lg') }}
+      {{ motivation_widget(v.motivation_level, mot_bd, 'lg') }}
       {% if v.motivation_score is not none %}
-      <p class="muted tiny">Score {{ v.motivation_score }} / 100</p>
+      <p class="muted tiny">{{ v.motivation_score | pts(signed=false) }} / 100</p>
       {% endif %}
     </div>
     {% endif %}
-    {% if v.motivation_breakdown %}
-    <ul class="score-break">
-      {% for k, val in v.motivation_breakdown.items() if k not in ['note', 'inferred', 'estimate_only', 'reasons', 'level', 'score'] %}
-      <li><span>{{ k.replace('_', ' ') }}</span><strong>{{ val }}</strong></li>
-      {% endfor %}
-    </ul>
-    <p class="muted tiny">{{ v.motivation_breakdown.note }}</p>
+    {% if mot_bd %}
+    {{ score_breakdown(mot_bd, 'motivation') }}
+    <p class="muted tiny">{{ mot_bd.note }}</p>
     {% elif not v.motivation_level %}<p class="muted">No estimate yet.</p>{% endif %}
   </section>
 
@@ -152,27 +225,40 @@
     <h2>Comparables</h2>
     {% if v.comparable_stats %}
     <ul class="score-break">
-      <li><span>Comparable listings</span><strong>{{ v.comparable_stats.comparable_count }}</strong></li>
-      <li><span>Median ask</span><strong>{{ v.comparable_stats.median_price | zar }}</strong></li>
-      <li><span>Diff from median</span><strong>{{ v.comparable_stats.diff_from_median | zar if v.comparable_stats.diff_from_median is defined else '—' }}</strong></li>
-      <li><span>Price percentile</span><strong>{{ v.comparable_stats.price_percentile if v.comparable_stats.price_percentile is defined else '—' }}</strong></li>
+      <li>
+        <span class="sb-label"><em>Comparable listings</em></span>
+        <strong>{{ v.comparable_stats.comparable_count }}</strong>
+      </li>
+      <li>
+        <span class="sb-label"><em>Median ask</em></span>
+        <strong>{{ v.comparable_stats.median_price | zar }}</strong>
+      </li>
+      <li>
+        <span class="sb-label">
+          <em>Vs median</em>
+          {% if v.comparable_stats.diff_from_median is defined and v.comparable_stats.diff_from_median is not none %}
+          <small>{% if v.comparable_stats.diff_from_median < 0 %}below{% elif v.comparable_stats.diff_from_median > 0 %}above{% else %}in line{% endif %}</small>
+          {% endif %}
+        </span>
+        <strong>
+          {% if v.comparable_stats.diff_from_median is defined and v.comparable_stats.diff_from_median is not none %}
+            {% if v.comparable_stats.diff_from_median > 0 %}+{% endif %}{{ v.comparable_stats.diff_from_median | zar }}
+          {% else %}—{% endif %}
+        </strong>
+      </li>
+      <li>
+        <span class="sb-label"><em>Price percentile</em><small>higher = more expensive among comps</small></span>
+        <strong>{% if v.comparable_stats.price_percentile is defined and v.comparable_stats.price_percentile is not none %}{{ v.comparable_stats.price_percentile }}{% else %}—{% endif %}</strong>
+      </li>
+      {% if v.comparable_stats.fair_range %}
+      <li>
+        <span class="sb-label"><em>Fair ask band</em><small>±7% of median</small></span>
+        <strong>{{ v.comparable_stats.fair_range.low | zar }}–{{ v.comparable_stats.fair_range.high | zar }}</strong>
+      </li>
+      {% endif %}
     </ul>
     <p class="muted tiny">{{ v.comparable_stats.disclaimer }}</p>
     {% else %}<p class="muted">Insufficient comps.</p>{% endif %}
-  </section>
-
-  <section>
-    <h2>Duplicate evidence</h2>
-    {% if v.match_evidence %}
-    <ul>
-      {% for m in v.match_evidence %}
-      <li>Score {{ m.score }} · {{ m.confidence }}{% if m.is_manual %} (manual){% endif %}</li>
-      {% endfor %}
-    </ul>
-    {% else %}<p class="muted">No cross-site matches recorded.</p>{% endif %}
-    {% if v.risk_flags %}
-    <p class="risk">Risk flags: {{ v.risk_flags | join(', ') }}</p>
-    {% endif %}
   </section>
 </div>
 
@@ -190,19 +276,30 @@
     <button type="submit">Add to shortlist</button>
   </form>
   {% else %}
-  <form method="post" action="/shortlist/{{ v.shortlist_entry.id }}/update" class="stack-form">
-    <label>Status
-      <select name="status">
-        {% for s in ['watching','interested','dealer_contacted','viewing_scheduled','negotiating','rejected','sold','purchased'] %}
-        <option value="{{ s }}" {% if v.shortlist_entry.status == s %}selected{% endif %}>{{ s.replace('_',' ') }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Interest (1–5) <input type="number" min="1" max="5" name="interest_level" value="{{ v.shortlist_entry.interest_level }}" /></label>
+  <form method="post" action="/shortlist/{{ v.shortlist_entry.id }}/update" class="stack-form is-wide">
+    <div class="form-grid">
+      <label>Status
+        <select name="status">
+          {% for s, label in [
+            ('watching','Watching'),
+            ('interested','Interested'),
+            ('dealer_contacted','Dealer contacted'),
+            ('viewing_scheduled','Viewing scheduled'),
+            ('negotiating','Negotiating'),
+            ('rejected','Rejected'),
+            ('sold','Sold'),
+            ('purchased','Purchased')
+          ] %}
+          <option value="{{ s }}" {% if v.shortlist_entry.status == s %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Interest (1–5) <input type="number" min="1" max="5" name="interest_level" value="{{ v.shortlist_entry.interest_level }}" /></label>
+      <label>Offered price <input type="number" name="offered_price_zar" value="{{ v.shortlist_entry.offered_price_zar or '' }}" /></label>
+      <label>Rejection reason <input type="text" name="rejection_reason" value="{{ v.shortlist_entry.rejection_reason or '' }}" /></label>
+    </div>
     <label>Notes <textarea name="notes" rows="3">{{ v.shortlist_entry.notes or '' }}</textarea></label>
-    <label>Offered price <input type="number" name="offered_price_zar" value="{{ v.shortlist_entry.offered_price_zar or '' }}" /></label>
     <label>Dealer response <textarea name="dealer_response" rows="2">{{ v.shortlist_entry.dealer_response or '' }}</textarea></label>
-    <label>Rejection reason <input type="text" name="rejection_reason" value="{{ v.shortlist_entry.rejection_reason or '' }}" /></label>
     <button type="submit">Save</button>
   </form>
   {% endif %}

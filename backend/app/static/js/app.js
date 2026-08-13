@@ -1067,11 +1067,11 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
 
 (function scoreTipPopup() {
   const DEAL_LABELS = {
-    price_value: "Price value",
-    completeness: "Completeness",
-    mileage: "Mileage",
-    reduction_history: "Reduction history",
-    time_on_market: "Time on market",
+    price_value: "Price vs comps",
+    completeness: "Known facts",
+    mileage: "Mileage vs age",
+    reduction_history: "Price cuts",
+    time_on_market: "Time listed",
     history_quality: "History quality",
     risk_penalty: "Risk penalty",
     total: "Total",
@@ -1087,12 +1087,12 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     "total",
   ];
   const MOTIVATION_LABELS = {
-    days_on_market: "Days on market",
-    price_reductions: "Price reductions",
-    reduction_timing: "Reduction timing",
-    multi_site: "Multi-site listing",
+    days_on_market: "Time listed",
+    price_reductions: "Price cuts",
+    reduction_timing: "Last cut",
+    multi_site: "Multiple sites",
     dealer_stock: "Dealer similar stock",
-    timing: "End-of-month timing",
+    timing: "Month-end timing",
     language_cues: "Clearance language",
     total: "Total",
   };
@@ -1106,7 +1106,7 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     "language_cues",
     "total",
   ];
-  const SKIP = new Set(["note", "inferred", "estimate_only", "reasons", "level", "score"]);
+  const SKIP = new Set(["note", "inferred", "estimate_only", "reasons", "level", "score", "inputs"]);
 
   const tip = document.createElement("div");
   tip.className = "score-tip-float";
@@ -1135,6 +1135,22 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     }
   }
 
+  function formatPts(value, signed) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "—";
+    const rounded = Math.abs(n - Math.round(n)) < 1e-9;
+    let body = rounded ? String(Math.round(n)) : n.toFixed(1);
+    if (signed && n > 0) body = `+${body}`;
+    return `${body} pts`;
+  }
+
+  function inputFact(breakdown, key) {
+    const inputs = breakdown && breakdown.inputs;
+    if (!inputs || typeof inputs !== "object") return "";
+    const fact = inputs[key];
+    return typeof fact === "string" ? fact : "";
+  }
+
   function renderBreakdown(el, breakdown) {
     const kind = el.getAttribute("data-tip-kind") || "deal";
     const labels = kind === "motivation" ? MOTIVATION_LABELS : DEAL_LABELS;
@@ -1148,7 +1164,10 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     const rows = keys
       .map((k) => {
         const label = labels[k] || k.replace(/_/g, " ");
-        return `<li data-key="${escapeText(k)}"><span>${escapeText(label)}</span><strong>${escapeText(breakdown[k])}</strong></li>`;
+        const fact = k === "total" ? "" : inputFact(breakdown, k);
+        const factHtml = fact ? `<small>${escapeText(fact)}</small>` : "";
+        const zeroClass = k !== "total" && Number(breakdown[k]) === 0 ? " class=\"is-zero\"" : "";
+        return `<li data-key="${escapeText(k)}"${zeroClass}><span class="sb-label"><em>${escapeText(label)}</em>${factHtml}</span><strong>${escapeText(formatPts(breakdown[k], k !== "total"))}</strong></li>`;
       })
       .join("");
     let body = rows
@@ -1156,18 +1175,18 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       : "";
     if (!rows && Array.isArray(breakdown.reasons) && breakdown.reasons.length) {
       body = `<ul class="score-break">${breakdown.reasons
-        .map((r) => `<li><span>${escapeText(String(r).replace(/_/g, " "))}</span><strong>✓</strong></li>`)
+        .map((r) => `<li><span class="sb-label"><em>${escapeText(String(r).replace(/_/g, " "))}</em></span><strong>✓</strong></li>`)
         .join("")}</ul>`;
     }
     const note = breakdown.note
       ? `<span class="tip-note">${escapeText(breakdown.note)}</span>`
       : "";
-    let title = kind === "motivation" ? "Motivation breakdown" : "Deal score breakdown";
+    let title = kind === "motivation" ? "Motivation points" : "Deal score points";
     if (kind === "motivation") {
       const level = breakdown.level ? String(breakdown.level).replace(/_/g, " ") : "";
       const score = breakdown.score != null ? breakdown.score : breakdown.total;
       if (level || score != null) {
-        title = `Motivation${level ? ` · ${level}` : ""}${score != null ? ` (${score})` : ""}`;
+        title = `Motivation${level ? ` · ${level}` : ""}${score != null ? ` · ${formatPts(score, false)}` : ""}`;
       }
     }
     tip.classList.toggle("motivation", kind === "motivation");
@@ -1242,11 +1261,12 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
 })();
 
 (function voteControls() {
-  function applyVoteToRow(row, vote) {
-    row.dataset.vote = vote || "";
-    row.classList.toggle("is-thumbs-down", vote === "down");
-    row.classList.toggle("is-thumbs-up", vote === "up");
-    row.querySelectorAll(".vote-btn").forEach((btn) => {
+  function applyVoteToScope(scope, vote) {
+    if (!scope) return;
+    if (scope.dataset) scope.dataset.vote = vote || "";
+    scope.classList.toggle("is-thumbs-down", vote === "down");
+    scope.classList.toggle("is-thumbs-up", vote === "up");
+    scope.querySelectorAll(".vote-btn").forEach((btn) => {
       const active = btn.getAttribute("data-vote") === vote;
       btn.classList.toggle("is-active", active);
       btn.setAttribute("aria-pressed", active ? "true" : "false");
@@ -1278,12 +1298,11 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Vote failed");
       const row = controls.closest("tr");
-      if (row) {
-        applyVoteToRow(row, data.vote);
-        if (data.vote === "down") {
-          const tbody = row.parentElement;
-          moveThumbsDownToBottom(tbody);
-        }
+      const page = controls.closest("[data-vehicle-vote]");
+      applyVoteToScope(row || page || controls, data.vote);
+      if (row && data.vote === "down") {
+        const tbody = row.parentElement;
+        moveThumbsDownToBottom(tbody);
       }
     } catch (_err) {
       btn.classList.add("vote-error");
@@ -1492,5 +1511,21 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
   root.querySelectorAll(".price-history-log time[datetime]").forEach((el) => {
     const iso = el.getAttribute("datetime");
     if (iso) el.textContent = formatWhen(iso);
+  });
+})();
+
+(function detailGallery() {
+  const root = document.querySelector("[data-gallery]");
+  if (!root) return;
+  const main = root.querySelector("[data-gallery-main]");
+  const thumbs = Array.from(root.querySelectorAll("[data-gallery-thumb]"));
+  if (!main || !thumbs.length) return;
+  thumbs.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const src = btn.getAttribute("data-gallery-thumb");
+      if (!src) return;
+      main.src = src;
+      thumbs.forEach((other) => other.classList.toggle("is-active", other === btn));
+    });
   });
 })();

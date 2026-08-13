@@ -3,7 +3,11 @@
 from datetime import datetime, timedelta, timezone
 
 from app.models.entities import CanonicalVehicle
-from app.services.scoring import compute_deal_score, compute_motivation_score
+from app.services.scoring import (
+    compute_deal_score,
+    compute_motivation_score,
+    with_score_inputs,
+)
 
 
 def _base_vehicle(**kwargs):
@@ -32,6 +36,9 @@ def test_deal_score_breakdown_sums_transparently():
     assert "completeness" in breakdown
     assert "specification" not in breakdown
     assert breakdown["inferred"] is True
+    assert "inputs" in breakdown
+    assert "days tracked" in breakdown["inputs"]["time_on_market"]
+    assert "pts" not in breakdown["inputs"]["time_on_market"]
 
 
 def test_deal_score_does_not_prioritise_vx_or_grs():
@@ -76,3 +83,18 @@ def test_motivation_estimate_categories():
     assert "note" in breakdown
     assert breakdown["estimate_only"] is True
     assert score >= 50
+    assert breakdown["inputs"]["days_on_market"] == "70 days tracked"
+    assert breakdown["inputs"]["price_reductions"] == "R40,000 total cuts"
+    assert breakdown["inputs"]["multi_site"] == "3 marketplaces"
+    assert breakdown["inputs"]["dealer_stock"] == "3 similar at this dealer"
+    assert "points toward" in breakdown["note"].lower()
+
+
+def test_with_score_inputs_backfills_legacy_breakdowns():
+    vehicle = _base_vehicle()
+    legacy = {"days_on_market": 8, "total": 8, "note": "old"}
+    enriched = with_score_inputs(vehicle, legacy, kind="motivation")
+    assert enriched is not legacy
+    assert enriched["days_on_market"] == 8
+    assert "25 days tracked" in enriched["inputs"]["days_on_market"]
+    assert "R30,000" in enriched["inputs"]["price_reductions"]

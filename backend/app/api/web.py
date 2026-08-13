@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -52,7 +53,43 @@ def _fmt_zar(value: int | None) -> str:
     return f"R{value:,}"
 
 
+def _fmt_km(value: int | None) -> str:
+    if value is None:
+        return "—"
+    return f"{int(value):,} km"
+
+
+def _fmt_when(value: datetime | str | None) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return "—"
+        try:
+            value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return raw
+    return value.strftime("%d %b %Y")
+
+
+def _fmt_pts(value: float | int | None, signed: bool = True) -> str:
+    if value is None:
+        return "—"
+    number = float(value)
+    if abs(number - round(number)) < 1e-9:
+        body = str(int(round(number)))
+    else:
+        body = f"{number:.1f}"
+    if signed and number > 0:
+        body = f"+{body}"
+    return f"{body} pts"
+
+
 templates.env.filters["zar"] = _fmt_zar
+templates.env.filters["km"] = _fmt_km
+templates.env.filters["when"] = _fmt_when
+templates.env.filters["pts"] = _fmt_pts
 
 
 @router.post("/collect")

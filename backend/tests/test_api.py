@@ -100,6 +100,28 @@ def test_shortlist_flow(client, db_session, auth):
     assert len(listed.json()) >= 1
 
 
+def test_vehicle_detail_page_clarifies_score_points(client, db_session, auth):
+    _seed(db_session)
+    client.post(
+        "/login",
+        data={"username": auth[0], "password": auth[1], "next": "/"},
+        follow_redirects=False,
+    )
+    vehicles = client.get("/api/vehicles", auth=auth).json()
+    vid = vehicles[0]["id"]
+    page = client.get(f"/vehicles/{vid}")
+    assert page.status_code == 200
+    html = page.text
+    assert "pts" in html
+    assert "Time listed" in html
+    assert "Points toward 100" in html
+    assert "not days on market" in html
+    assert "Facts" in html
+    assert "← Listings" in html
+    assert "not this listing" in html
+    assert "Stock model" in html
+
+
 def test_html_parser_autotrader():
     from app.collectors.autotrader import AutoTraderCollector
     from pathlib import Path
