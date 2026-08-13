@@ -1,0 +1,81 @@
+{% from "partials/score_widgets.html" import deal_score_widget, motivation_widget %}
+<div class="table-wrap">
+  <table class="listings">
+    <thead>
+      <tr>
+        <th>Year</th>
+        <th>Variant</th>
+        <th>Price</th>
+        <th>Mileage</th>
+        <th>Location</th>
+        <th>Dealer</th>
+        <th>Days</th>
+        <th>Reduction</th>
+        <th>Deal</th>
+        <th>Motivation</th>
+        <th>Links</th>
+        <th>Vote</th>
+      </tr>
+    </thead>
+    <tbody data-live-tbody>
+      {% for v in vehicles %}
+      <tr data-vehicle-id="{{ v.id }}" class="{% if v.vote == 'down' %}is-thumbs-down{% elif v.vote == 'up' %}is-thumbs-up{% endif %}" data-vote="{{ v.vote or '' }}">
+        <td>
+          <span class="year-cell">
+            {% if v.colour_css %}
+            <span class="colour-swatch" style="background: {{ v.colour_css }}" title="{{ v.colour }}" aria-label="Colour {{ v.colour }}"></span>
+            {% elif v.colour %}
+            <span class="colour-swatch is-unknown" title="{{ v.colour }}" aria-label="Colour {{ v.colour }}"></span>
+            {% endif %}
+            <span>{{ v.year or '—' }}</span>
+          </span>
+        </td>
+        <td>
+          <a href="{{ v.detail_path }}"><strong>{{ v.variant or 'Fortuner' }}</strong>{% if v.is_stretch %} <em class="tag">stretch</em>{% endif %}</a>
+        </td>
+        <td>{{ v.price | zar }}</td>
+        <td>{% if v.mileage %}{{ "{:,}".format(v.mileage) }} km{% else %}—{% endif %}</td>
+        <td>{{ v.location or '—' }}</td>
+        <td>{{ v.dealer or '—' }}</td>
+        <td>{{ v.days_tracked }}</td>
+        <td>{% if v.total_reduction %}{{ v.total_reduction | zar }}{% else %}—{% endif %}</td>
+        <td>{{ deal_score_widget(v.deal_score, v.deal_score_breakdown) }}</td>
+        <td>{{ motivation_widget(v.motivation_level, v.motivation_breakdown) }}</td>
+        <td class="links-cell">
+          <div class="source-links">
+            {% for s in v.sources if s.status in ['active', 'relisted'] and s.url %}
+              <a class="btn-link external" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>
+            {% else %}
+              <span class="muted">—</span>
+            {% endfor %}
+          </div>
+        </td>
+        <td class="vote-cell">
+          <div class="vote-controls" data-vote-controls data-vehicle-id="{{ v.id }}">
+            <button type="button" class="vote-btn vote-up {% if v.vote == 'up' %}is-active{% endif %}" data-vote="up" aria-label="Thumbs up" aria-pressed="{{ 'true' if v.vote == 'up' else 'false' }}">👍</button>
+            <button type="button" class="vote-btn vote-down {% if v.vote == 'down' %}is-active{% endif %}" data-vote="down" aria-label="Thumbs down" aria-pressed="{{ 'true' if v.vote == 'down' else 'false' }}">👎</button>
+          </div>
+        </td>
+      </tr>
+{% else %}
+      <tr>
+        <td colspan="12">
+          <div class="empty-state">
+            <p class="muted">No vehicles match the current filters.</p>
+            {% if nationwide_count is defined and nationwide_count > 0 %}
+            <p>{{ nationwide_count }} active listing{{ 's' if nationwide_count != 1 else '' }} tracked nationwide — try clearing Province or open all SA.</p>
+            <p>
+              <a class="btn-link" href="/listings?sort=deal_score_desc&amp;drivetrain=4x4&amp;max_mileage=100000">Show all SA · 4x4 · ≤100k km</a>
+              · <a class="btn-link" href="/listings?sort=deal_score_desc">Show everything</a>
+              · <a class="btn-link" href="/listings">Reset WC defaults</a>
+            </p>
+            {% else %}
+            <p class="muted">Nothing active in the database yet. Run <strong>Collect live listings now</strong> on the dashboard (1–3 minutes), then refresh.</p>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

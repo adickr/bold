@@ -1,0 +1,68 @@
+[
+  {
+    "source": "webuycars",
+    "source_listing_id": "WBC3001",
+    "url": "https://www.webuycars.co.za/buy-a-car/WBC3001",
+    "title": "2022 Toyota Fortuner 2.8GD-6 4x4 VX",
+    "description": "WeBuyCars stock \u2014 same VIN as other sites.",
+    "dealer_name": "WeBuyCars",
+    "dealer_location": "Meadowdale, Gauteng",
+    "dealer_stock_number": "WBC3001",
+    "year": 2022,
+    "make": "Toyota",
+    "model": "Fortuner",
+    "variant_raw": "2.8GD-6 4x4 VX",
+    "price_zar": 684900,
+    "mileage_km": 45210,
+    "colour": "White",
+    "vin": "AHTZZ8CDX01234567",
+    "image_urls": [
+      "https://images.example.com/fortuner-vx-white-1.jpg"
+    ],
+    "transmission": "automatic",
+    "fuel_type": "diesel",
+    "drivetrain": "4x4"
+  },
+  {
+    "source": "webuycars",
+    "source_listing_id": "WBC3002",
+    "url": "https://www.webuycars.co.za/buy-a-car/WBC3002",
+    "title": "2018 Toyota Fortuner 2.8 GD-6 4x4",
+    "description": "Accident repaired \u2014 disclosed.",
+    "dealer_name": "WeBuyCars",
+    "dealer_location": "Cape Town, Western Cape",
+    "dealer_stock_number": "WBC3002",
+    "year": 2018,
+    "make": "Toyota",
+    "model": "Fortuner",
+    "variant_raw": "2.8 GD-6 4x4",
+    "price_zar": 479900,
+    "mileage_km": 95000,
+    "colour": "Black",
+    "image_urls": [
+      "https://images.example.com/wbc-18-1.jpg"
+    ],
+    "drivetrain": "4x4"
+  },
+  {
+    "source": "webuycars",
+    "source_listing_id": "WBC3003",
+    "url": "https://www.webuycars.co.za/buy-a-car/WBC3003",
+    "title": "2024 Toyota Fortuner 2.8 VX 4x4",
+    "description": "Nearly new. Stretch on price.",
+    "dealer_name": "WeBuyCars",
+    "dealer_location": "Midrand, Gauteng",
+    "dealer_stock_number": "WBC3003",
+    "year": 2024,
+    "make": "Toyota",
+    "model": "Fortuner",
+    "variant_raw": "2.8 VX 4x4",
+    "price_zar": 724900,
+    "mileage_km": 12000,
+    "colour": "Attitude Black",
+    "image_urls": [
+      "https://images.example.com/vx-black-new.jpg"
+    ],
+    "drivetrain": "4x4"
+  }
+]

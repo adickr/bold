@@ -1,0 +1,291 @@
+{% extends "partials/base.html" %}
+{% block title %}Dashboard · Fortuner Agent{% endblock %}
+{% block content %}
+{% from "partials/score_widgets.html" import deal_score_widget, motivation_widget %}
+{% set sp = search_profile %}
+{% set sc = search_criteria or {} %}
+{% set lf = stats.last_fetch %}
+<section class="hero-panel">
+  <div class="hero-copy">
+    <p class="eyebrow">South African used market</p>
+    <h1>Toyota Fortuner watch</h1>
+    <p class="lede">Set your search, collect live listings, and rank by deal score. Changing criteria keeps prior stock in the database — the dashboard shows matches for the active search.</p>
+
+    <form method="post" action="/search-profile" class="search-profile-form" data-search-profile-form>
+      <div class="search-profile-grid">
+        <label>Province
+          <input type="text" name="province" value="{{ sp.province or '' }}" placeholder="Western Cape (blank = nationwide)" />
+        </label>
+        <label>Max km
+          <input type="number" name="max_mileage_km" value="{{ sp.max_mileage_km or 100000 }}" min="1000" step="1000" required />
+        </label>
+        <label>Drivetrain
+          <select name="required_drivetrain">
+            <option value="4x4" {% if (sp.required_drivetrain or '4x4') == '4x4' %}selected{% endif %}>4x4</option>
+            <option value="4x2" {% if sp.required_drivetrain == '4x2' %}selected{% endif %}>4x2</option>
+            <option value="" {% if not sp.required_drivetrain %}selected{% endif %}>Any</option>
+          </select>
+        </label>
+        <label>Comfort price
+          <input type="number" name="max_price_zar" value="{{ sp.max_price_zar or '' }}" placeholder="e.g. 700000" />
+        </label>
+      </div>
+      <label class="check search-profile-check">
+        <input type="checkbox" name="enforce_max_price" value="1" {% if sp.enforce_max_price %}checked{% endif %} />
+        Hard price cap on marketplace searches
+      </label>
+      <p class="muted tiny search-profile-label">Active: <strong>{{ sp.label or '—' }}</strong>{% if saved %} · saved{% endif %}</p>
+      <div class="search-profile-actions">
+        <button type="submit" name="action" value="save" class="btn-ghost">Save search</button>
+        <button type="submit" name="action" value="collect" data-collect-btn {% if collect_status.running %}disabled{% endif %}>
+          {% if collect_status.running %}Scanning…{% else %}Save &amp; collect live{% endif %}
+        </button>
+      </div>
+      <p class="muted tiny">Runs AutoTrader, Cars.co.za and WeBuyCars (often 2–5 minutes). Soft criteria (mileage) keep older rows when you tighten the search later.</p>
+    </form>
+
+    <dialog class="changes-dialog updates-deck" data-changes-dialog>
+      <form method="dialog" class="changes-dialog-head">
+        <div>
+          <h2>Market updates</h2>
+          <p class="muted tiny" data-changes-summary>
+            {% if lf and lf.last_fetch_at %}{{ lf.full_summary or lf.summary }} · last fetch <time data-fetch-at datetime="{{ lf.last_fetch_at }}">{{ lf.last_fetch_at }}</time>{% else %}No fetch yet{% endif %}
+          </p>
+        </div>
+        <button type="submit" class="btn-ghost" value="close" aria-label="Close">Close</button>
+      </form>
+      <div class="changes-dialog-body" data-changes-body>
+        <p class="muted tiny">Loading updates…</p>
+      </div>
+    </dialog>
+    <script type="application/json" data-last-fetch-json>{{ (stats.last_fetch or none) | tojson }}</script>
+
+    <div class="collect-progress {% if scanning or collect_status.running %}is-active{% endif %}"
+         data-collect-progress
+         {% if scanning or collect_status.running %}data-auto-poll="1"{% endif %}>
+      <div class="collect-progress-head">
+        <strong data-collect-message>{{ collect_status.message or 'Ready to scan' }}</strong>
+        <span class="mono" data-collect-percent>{{ collect_status.percent or 0 }}%</span>
+      </div>
+      <div class="progress-track" aria-hidden="true">
+        <div class="progress-bar" data-collect-bar style="width: {{ collect_status.percent or 0 }}%"></div>
+      </div>
+      <ul class="collect-sources" data-collect-sources>
+        {% for s in collect_status.sources or [] %}
+        <li data-source="{{ s.source }}" data-status="{{ s.status }}">
+          <span class="dot"></span>
+          <span class="label">{{ s.label }}</span>
+          <span class="meta">
+            {% if s.status == 'running' %}scanning…
+            {% elif s.status == 'done' %}{{ s.found if s.found is not none else 'ok' }} found
+            {% elif s.status == 'failed' %}failed
+            {% else %}waiting{% endif %}
+          </span>
+        </li>
+        {% else %}
+        <li data-source="autotrader" data-status="pending"><span class="dot"></span><span class="label">AutoTrader</span><span class="meta">waiting</span></li>
+        <li data-source="cars_co_za" data-status="pending"><span class="dot"></span><span class="label">Cars.co.za</span><span class="meta">waiting</span></li>
+        <li data-source="webuycars" data-status="pending"><span class="dot"></span><span class="label">WeBuyCars</span><span class="meta">waiting</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    {% if collected is not none %}
+    <p class="lede">Collection finished: {{ collected }}/{{ total }} sources succeeded.
+      {% if nationwide_count is defined %}{{ nationwide_count }} active nationwide{% endif %}
+      · {{ stats.active_matching }} match {{ sp.label or 'active search' }}.
+      {% if stats.active_matching == 0 and nationwide_count %}
+        <a href="/listings?sort=deal_score_desc">Show everything</a> while stock catches up after re-collect.
+      {% endif %}
+    </p>
+    {% endif %}
+  </div>
+
+  <aside class="hero-fetch" data-fetch-meta>
+    <p class="hero-fetch-label">Last fetch</p>
+    {% if lf and lf.last_fetch_at %}
+    <p class="fetch-line">
+      <time class="mono" data-fetch-at datetime="{{ lf.last_fetch_at }}">{{ lf.last_fetch_at }}</time>
+    </p>
+    <p class="fetch-changes {% if lf.has_material %}has-changes{% else %}no-changes{% endif %}" data-fetch-changes>
+      {{ lf.summary }}
+    </p>
+    {% if lf.highlights %}
+    <ul class="fetch-highlights" data-fetch-highlights>
+      {% for h in lf.highlights[:6] %}
+      <li data-kind="{{ h.kind }}">
+        <a href="{{ h.href }}">{{ h.label }}{% if h.detail %} <span class="mono">{{ h.detail }}</span>{% endif %}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <ul class="fetch-highlights" data-fetch-highlights hidden></ul>
+    {% endif %}
+    <p class="fetch-actions">
+      <button type="button" class="text-link-btn" data-what-changed-btn>
+        {{ lf.updates_label or 'Show all updates' }}
+      </button>
+    </p>
+    {% else %}
+    <p class="fetch-line muted" data-fetch-empty>No fetch yet — save &amp; collect to start.</p>
+    <ul class="fetch-highlights" data-fetch-highlights hidden></ul>
+    <p class="fetch-actions" hidden>
+      <button type="button" class="text-link-btn" data-what-changed-btn>Show all updates</button>
+    </p>
+    {% endif %}
+  </aside>
+</section>
+
+<section class="spotlight-grid" data-live-spotlights>
+  <article data-spot="top_deal">
+    <h2>Top deal</h2>
+    {% if stats.top_deal %}
+      {% set src = stats.top_deal.primary_source %}
+      <a class="spot-card" href="{{ src.url if src and src.url else (stats.top_deal.detail_path or ('/vehicles/' ~ stats.top_deal.id)) }}"{% if src and src.url %} target="_blank" rel="noopener noreferrer"{% endif %}>
+        <p class="spot-title">{{ stats.top_deal.year }} {{ stats.top_deal.variant }}</p>
+        <div class="spot-meta">
+          <p class="spot-price">{{ stats.top_deal.price | zar }}</p>
+          {{ deal_score_widget(stats.top_deal.deal_score, none, 'sm') }}
+        </div>
+        <span class="spot-cta">Open on {{ src.label if src and src.label else 'listing' }} →</span>
+      </a>
+    {% else %}<p class="muted">No vehicles yet — run collectors.</p>{% endif %}
+  </article>
+  <article data-spot="best_grs">
+    <h2>Best GR-S</h2>
+    {% if stats.best_grs %}
+      {% set src = stats.best_grs.primary_source %}
+      <a class="spot-card" href="{{ src.url if src and src.url else (stats.best_grs.detail_path or ('/vehicles/' ~ stats.best_grs.id)) }}"{% if src and src.url %} target="_blank" rel="noopener noreferrer"{% endif %}>
+        <p class="spot-title">{{ stats.best_grs.year }} {{ stats.best_grs.variant }}</p>
+        <div class="spot-meta">
+          <p class="spot-price">{{ stats.best_grs.price | zar }}</p>
+          {{ deal_score_widget(stats.best_grs.deal_score, none, 'sm') }}
+        </div>
+        <span class="spot-cta">Open on {{ src.label if src and src.label else 'listing' }} →</span>
+      </a>
+    {% else %}<p class="muted">None tracked</p>{% endif %}
+  </article>
+  <article data-spot="best_vx">
+    <h2>Best VX</h2>
+    {% if stats.best_vx %}
+      {% set src = stats.best_vx.primary_source %}
+      <a class="spot-card" href="{{ src.url if src and src.url else (stats.best_vx.detail_path or ('/vehicles/' ~ stats.best_vx.id)) }}"{% if src and src.url %} target="_blank" rel="noopener noreferrer"{% endif %}>
+        <p class="spot-title">{{ stats.best_vx.year }} {{ stats.best_vx.variant }}</p>
+        <div class="spot-meta">
+          <p class="spot-price">{{ stats.best_vx.price | zar }}</p>
+          {{ deal_score_widget(stats.best_vx.deal_score, none, 'sm') }}
+        </div>
+        <span class="spot-cta">Open on {{ src.label if src and src.label else 'listing' }} →</span>
+      </a>
+    {% else %}<p class="muted">None tracked</p>{% endif %}
+  </article>
+  <article data-spot="most_motivated">
+    <h2>Most motivated</h2>
+    {% if stats.most_motivated %}
+      {% set src = stats.most_motivated.primary_source %}
+      <a class="spot-card" href="{{ src.url if src and src.url else (stats.most_motivated.detail_path or ('/vehicles/' ~ stats.most_motivated.id)) }}"{% if src and src.url %} target="_blank" rel="noopener noreferrer"{% endif %}>
+        <p class="spot-title">{{ stats.most_motivated.year }} {{ stats.most_motivated.variant }}</p>
+        <div class="spot-meta">
+          <p class="spot-price">{{ stats.most_motivated.price | zar }}</p>
+          {{ motivation_widget(stats.most_motivated.motivation_level, none, 'sm') }}
+        </div>
+        <span class="spot-cta">Open on {{ src.label if src and src.label else 'listing' }} →</span>
+      </a>
+    {% else %}<p class="muted">None tracked</p>{% endif %}
+  </article>
+</section>
+
+<section class="market-overview" data-price-dist data-live-stats>
+  <div class="section-head">
+    <div>
+      <h2>Market snapshot</h2>
+      <p class="muted tiny">{{ search_profile.label if search_profile else 'Active search' }} — how stock moves day by day</p>
+    </div>
+  </div>
+
+  <p class="market-strip">
+    <span><strong class="mono" data-stat="active_matching">{{ stats.active_matching }}</strong> active</span>
+    <span class="fetch-sep">·</span>
+    <span><strong class="mono" data-stat="new_today">{{ stats.new_today }}</strong> new today</span>
+    <span class="fetch-sep">·</span>
+    <span><strong class="mono" data-stat="reductions_this_week">{{ stats.reductions_this_week }}</strong> cuts this week</span>
+    <span class="fetch-sep">·</span>
+    <span>median ask <strong class="mono" data-stat="median_asking_price">{{ stats.median_asking_price | zar }}</strong></span>
+  </p>
+
+  <div class="time-to-sell" data-time-to-sell
+       data-listed="{{ stats.median_days_listed if stats.median_days_listed is not none else '' }}"
+       data-gone="{{ stats.median_days_to_gone if stats.median_days_to_gone is not none else '' }}"
+       data-gone-n="{{ stats.gone_sample_size or 0 }}">
+    <p class="time-to-sell-label">Typical time to sell</p>
+    <p class="time-to-sell-value">
+      {% if stats.median_days_to_gone is not none and stats.gone_sample_size %}
+      <strong class="mono" data-stat="median_days_to_gone">{{ stats.median_days_to_gone }} days</strong>
+      <span class="muted tiny" data-time-to-sell-note>median until a matching listing disappears · last 30 days · n={{ stats.gone_sample_size }}</span>
+      {% else %}
+      <strong class="mono" data-stat="median_days_to_gone">Building…</strong>
+      <span class="muted tiny" data-time-to-sell-note>Needs cars in your search to leave the market (collect over a few days). Meanwhile, active matches have been listed a median of {% if stats.median_days_listed is not none %}<span data-stat="median_days_listed">{{ stats.median_days_listed }}d</span>{% else %}—{% endif %}.</span>
+      {% endif %}
+    </p>
+  </div>
+
+  {% set mh = stats.market_history %}
+  <div class="stock-flow" data-market-spark data-stock-flow
+       data-history='{{ (mh or {}) | tojson | forceescape }}'>
+    <div class="stock-flow-head">
+      <p class="stock-flow-title">Listings over time</p>
+      <p class="muted tiny" data-spark-label>
+        {% if mh and mh.label %}{{ mh.label }}{% else %}Active stock · new vs gone · last 30 days{% endif %}
+      </p>
+    </div>
+    <div class="stock-flow-legend" data-stock-legend>
+      <span class="leg active"><i></i> Active</span>
+      <span class="leg new"><i></i> New</span>
+      <span class="leg gone"><i></i> Gone</span>
+    </div>
+    <div class="spark-chart stock-flow-chart" data-spark-chart></div>
+  </div>
+
+  <div class="price-legend" data-price-legend>
+    <span class="leg prior"><i></i> Already listed</span>
+    <span class="leg new"><i></i> New today</span>
+  </div>
+
+  {% if stats.price_distribution %}
+  {% set max_count = (stats.price_distribution | map(attribute='count') | max) or 1 %}
+  <div class="price-chart" data-price-chart style="--max-count: {{ max_count }}">
+    {% for b in stats.price_distribution %}
+    {% set new_n = b.new_count or 0 %}
+    {% set prior_n = b.prior_count if b.prior_count is defined else (b.count - new_n) %}
+    <div class="price-bar {% if b.count == 0 %}is-empty{% endif %}"
+         style="--n: {{ b.count }}; --new: {{ new_n }}; --prior: {{ prior_n }}"
+         title="{{ b.count }} car{{ 's' if b.count != 1 else '' }}{% if new_n %} · {{ new_n }} new today{% endif %} · {{ b.label }}">
+      <span class="n">
+        {% if b.count %}{{ b.count }}{% endif %}
+        {% if new_n %}<span class="delta">+{{ new_n }}</span>{% endif %}
+      </span>
+      <span class="bar" aria-hidden="true">
+        {% if prior_n %}<span class="seg prior" style="flex: {{ prior_n }} 1 0"></span>{% endif %}
+        {% if new_n %}<span class="seg new" style="flex: {{ new_n }} 1 0"></span>{% endif %}
+      </span>
+      <span class="lbl">{{ b.label }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted" data-price-empty>No priced matches yet — run a collect to fill the chart.</p>
+  {% endif %}
+</section>
+
+<section data-live-listings data-list-limit="{{ list_limit }}" data-matching-count="{{ matching_count }}" data-search-label="{{ search_profile.label if search_profile else 'active search' }}">
+  <div class="section-head">
+    <h2>Best matching deals ({{ search_profile.label if search_profile else 'active search' }})</h2>
+    <span class="muted tiny" data-live-count>{% if matching_count %}{{ matching_count }} matching{% endif %}</span>
+  </div>
+  {% include "partials/vehicle_table.html" %}
+  <div class="load-more-wrap" data-load-more-wrap {% if not matching_count or (vehicles|length) >= matching_count %}hidden{% endif %}>
+    <button type="button" class="btn-ghost" data-load-more>Load more</button>
+    <span class="muted tiny" data-load-more-meta>Showing {{ vehicles|length }} of {{ matching_count }}</span>
+  </div>
+</section>
+{% endblock %}

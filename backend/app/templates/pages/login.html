@@ -1,0 +1,16 @@
+{% extends "partials/base.html" %}
+{% block title %}Login · Fortuner Agent{% endblock %}
+{% block content %}
+<section class="login-panel">
+  <h1>Fortuner Agent</h1>
+  <p class="lede">Private buying tool — sign in to continue.</p>
+  {% if error %}<p class="risk">{{ error }}</p>{% endif %}
+  <form method="post" action="/login" class="stack-form">
+    <input type="hidden" name="next" value="{{ next_path }}" />
+    <label>Username <input type="text" name="username" value="buyer" autocomplete="username" required /></label>
+    <label>Password <input type="password" name="password" autocomplete="current-password" required /></label>
+    <button type="submit">Sign in</button>
+  </form>
+  <p class="muted tiny">Default local login: buyer / fortuner</p>
+</section>
+{% endblock %}

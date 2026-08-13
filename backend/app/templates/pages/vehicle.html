@@ -1,0 +1,223 @@
+{% extends "partials/base.html" %}
+{% block title %}{{ v.year }} {{ v.variant_normalised }} · Fortuner Agent{% endblock %}
+{% block content %}
+{% from "partials/score_widgets.html" import deal_score_widget, motivation_widget %}
+<section class="detail-hero">
+  <div class="detail-copy">
+    <p class="eyebrow">{% if v.is_stretch_candidate %}Stretch candidate · {% endif %}{{ v.drivetrain or 'drivetrain unclear' }}</p>
+    <h1>{{ v.year }} {{ v.variant_normalised or 'Fortuner' }}</h1>
+    <p class="lede">{{ summary.dealer or 'Unknown dealer' }} · {{ summary.location or 'South Africa' }}</p>
+    <div class="price-row">
+      <strong>{{ summary.price | zar }}</strong>
+      <span>lowest ask across {{ summary.source_count }} source{{ 's' if summary.source_count != 1 else '' }}</span>
+    </div>
+    <div class="chip-row score-chips">
+      <span class="chip-score">
+        {{ deal_score_widget(summary.deal_score, summary.deal_score_breakdown, 'md') }}
+        <span class="chip-caption">Deal <i>(inferred)</i></span>
+      </span>
+      <span class="chip-score">
+        {{ motivation_widget(summary.motivation_level, summary.motivation_breakdown, 'md') }}
+        <span class="chip-caption">Motivation <i>(estimate)</i></span>
+      </span>
+      <span>{{ summary.days_tracked }} days tracked</span>
+      {% if summary.total_reduction %}<span>−{{ summary.total_reduction | zar }} total</span>{% endif %}
+    </div>
+    <div class="actions" style="margin-top:1rem">
+      {% set active_sources = summary.sources | selectattr('status', 'in', ['active', 'relisted']) | selectattr('url') | list %}
+      {% if active_sources %}
+        {% set primary = active_sources|sort(attribute='price')|first %}
+        <a class="button-link" href="{{ primary.url }}" target="_blank" rel="noopener noreferrer">
+          Open on {{ primary.label }}
+        </a>
+        {% for s in active_sources %}
+          {% if s.url != primary.url %}
+            <a class="button-link secondary" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.label }}</a>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        <p class="risk">No working marketplace link for this vehicle yet — re-collect live listings.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<div class="detail-grid">
+  <section>
+    <h2>Where it’s listed</h2>
+    <ul class="source-list">
+      {% for s in summary.sources %}
+      <li class="{% if s.status not in ['active', 'relisted'] %}muted{% endif %}">
+        <div class="source-row">
+          {% if s.url and s.status in ['active', 'relisted'] %}
+            <a class="button-link" href="{{ s.url }}" target="_blank" rel="noopener noreferrer">
+              View on {{ s.label }}
+            </a>
+          {% else %}
+            <span class="button-link secondary">{{ s.label }}{% if s.status %} ({{ s.status.replace('_',' ') }}){% endif %}</span>
+          {% endif %}
+          <span>{{ s.price | zar }} · {{ s.status.replace('_', ' ') if s.status else '—' }}</span>
+        </div>
+        <div class="muted">{{ s.title }}</div>
+        {% if s.url %}
+          <div class="muted tiny">{{ s.url }}</div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="price-history-panel" data-price-history>
+    <h2>Price history</h2>
+    {% set events = v.price_events|sort(attribute='observed_at') %}
+    {% if events %}
+    <div class="price-history-chart" data-price-history-chart></div>
+    <p class="muted tiny price-history-summary">
+      Original {{ v.original_price | zar }} · Lowest {{ v.lowest_observed_price | zar }} · Current {{ v.current_lowest_price | zar }}
+    </p>
+    <details class="price-history-log">
+      <summary>Event log <span class="mono">{{ events|length }}</span></summary>
+      <ol class="timeline">
+        {% for e in events %}
+        <li>
+          <time datetime="{{ e.observed_at.isoformat() if e.observed_at else '' }}">{{ e.observed_at }}</time>
+          {% if e.old_price_zar is not none %}
+            {{ e.old_price_zar | zar }} → {{ e.new_price_zar | zar }}
+            <span class="change {% if e.change_zar < 0 %}is-cut{% elif e.change_zar > 0 %}is-hike{% endif %}">({{ e.change_zar | zar }})</span>
+          {% else %}
+            Initial {{ e.new_price_zar | zar }}
+          {% endif %}
+          <span class="muted">{{ e.source }} · {{ e.note }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+    </details>
+    <script type="application/json" data-price-history-json>[
+      {%- for e in events %}
+      {
+        "at": {{ (e.observed_at.isoformat() if e.observed_at else none) | tojson }},
+        "old": {{ e.old_price_zar | tojson }},
+        "new": {{ e.new_price_zar | tojson }},
+        "change": {{ e.change_zar | tojson }},
+        "source": {{ e.source | tojson }},
+        "note": {{ e.note | tojson }}
+      }{% if not loop.last %},{% endif %}
+      {%- endfor %}
+    ]</script>
+    {% else %}
+    <p class="muted">No price events yet.</p>
+    <p class="muted tiny">Original {{ v.original_price | zar }} · Lowest {{ v.lowest_observed_price | zar }} · Current {{ v.current_lowest_price | zar }}</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Deal score</h2>
+    {% if v.deal_score is not none %}
+    <div class="score-panel-head">
+      {{ deal_score_widget(v.deal_score, v.deal_score_breakdown, 'lg') }}
+      <p class="muted tiny">Inferred from asking-price listings, not confirmed sales.</p>
+    </div>
+    {% endif %}
+    {% if v.deal_score_breakdown %}
+    <ul class="score-break">
+      {% for k, val in v.deal_score_breakdown.items() if k not in ['note', 'inferred'] %}
+      <li><span>{{ k.replace('_', ' ') }}</span><strong>{{ val }}</strong></li>
+      {% endfor %}
+    </ul>
+    <p class="muted tiny">{{ v.deal_score_breakdown.note }}</p>
+    {% elif v.deal_score is none %}<p class="muted">Not scored yet.</p>{% endif %}
+  </section>
+
+  <section>
+    <h2>Motivation estimate</h2>
+    {% if v.motivation_level %}
+    <div class="score-panel-head">
+      {{ motivation_widget(v.motivation_level, v.motivation_breakdown, 'lg') }}
+      {% if v.motivation_score is not none %}
+      <p class="muted tiny">Score {{ v.motivation_score }} / 100</p>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if v.motivation_breakdown %}
+    <ul class="score-break">
+      {% for k, val in v.motivation_breakdown.items() if k not in ['note', 'inferred', 'estimate_only', 'reasons', 'level', 'score'] %}
+      <li><span>{{ k.replace('_', ' ') }}</span><strong>{{ val }}</strong></li>
+      {% endfor %}
+    </ul>
+    <p class="muted tiny">{{ v.motivation_breakdown.note }}</p>
+    {% elif not v.motivation_level %}<p class="muted">No estimate yet.</p>{% endif %}
+  </section>
+
+  <section>
+    <h2>Comparables</h2>
+    {% if v.comparable_stats %}
+    <ul class="score-break">
+      <li><span>Comparable listings</span><strong>{{ v.comparable_stats.comparable_count }}</strong></li>
+      <li><span>Median ask</span><strong>{{ v.comparable_stats.median_price | zar }}</strong></li>
+      <li><span>Diff from median</span><strong>{{ v.comparable_stats.diff_from_median | zar if v.comparable_stats.diff_from_median is defined else '—' }}</strong></li>
+      <li><span>Price percentile</span><strong>{{ v.comparable_stats.price_percentile if v.comparable_stats.price_percentile is defined else '—' }}</strong></li>
+    </ul>
+    <p class="muted tiny">{{ v.comparable_stats.disclaimer }}</p>
+    {% else %}<p class="muted">Insufficient comps.</p>{% endif %}
+  </section>
+
+  <section>
+    <h2>Duplicate evidence</h2>
+    {% if v.match_evidence %}
+    <ul>
+      {% for m in v.match_evidence %}
+      <li>Score {{ m.score }} · {{ m.confidence }}{% if m.is_manual %} (manual){% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">No cross-site matches recorded.</p>{% endif %}
+    {% if v.risk_flags %}
+    <p class="risk">Risk flags: {{ v.risk_flags | join(', ') }}</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="panel">
+  <h2>Shortlist & notes</h2>
+  {% if not v.shortlist_entry %}
+  <form method="post" action="/vehicles/{{ v.id }}/shortlist" class="stack-form">
+    <label>Status
+      <select name="status">
+        <option value="watching">Watching</option>
+        <option value="interested">Interested</option>
+      </select>
+    </label>
+    <label>Notes <textarea name="notes" rows="3"></textarea></label>
+    <button type="submit">Add to shortlist</button>
+  </form>
+  {% else %}
+  <form method="post" action="/shortlist/{{ v.shortlist_entry.id }}/update" class="stack-form">
+    <label>Status
+      <select name="status">
+        {% for s in ['watching','interested','dealer_contacted','viewing_scheduled','negotiating','rejected','sold','purchased'] %}
+        <option value="{{ s }}" {% if v.shortlist_entry.status == s %}selected{% endif %}>{{ s.replace('_',' ') }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Interest (1–5) <input type="number" min="1" max="5" name="interest_level" value="{{ v.shortlist_entry.interest_level }}" /></label>
+    <label>Notes <textarea name="notes" rows="3">{{ v.shortlist_entry.notes or '' }}</textarea></label>
+    <label>Offered price <input type="number" name="offered_price_zar" value="{{ v.shortlist_entry.offered_price_zar or '' }}" /></label>
+    <label>Dealer response <textarea name="dealer_response" rows="2">{{ v.shortlist_entry.dealer_response or '' }}</textarea></label>
+    <label>Rejection reason <input type="text" name="rejection_reason" value="{{ v.shortlist_entry.rejection_reason or '' }}" /></label>
+    <button type="submit">Save</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Dealer message draft</h2>
+  <p class="muted">Generated for editing only — never sent automatically.</p>
+  <textarea id="draft-message" rows="8" readonly>{{ draft }}</textarea>
+  <div class="actions">
+    <button type="button" data-copy="#draft-message">Copy message</button>
+    <form method="post" action="/vehicles/{{ v.id }}/draft" class="inline-form">
+      <input type="number" name="preferred_offer_zar" placeholder="Preferred offer" />
+      <button type="submit">Regenerate</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

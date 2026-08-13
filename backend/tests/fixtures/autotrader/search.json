@@ -1,0 +1,87 @@
+[
+  {
+    "source": "autotrader",
+    "source_listing_id": "28001001",
+    "url": "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6-4x4-vx/28001001",
+    "title": "2022 Toyota Fortuner 2.8GD-6 4x4 VX",
+    "description": "Full Toyota service history. One owner. Must sell this month.",
+    "dealer_name": "Sandton Toyota",
+    "dealer_phone": "0115550101",
+    "dealer_location": "Sandton, Gauteng",
+    "dealer_stock_number": "ST-8821",
+    "year": 2022,
+    "make": "Toyota",
+    "model": "Fortuner",
+    "variant_raw": "2.8GD-6 4x4 VX",
+    "price_zar": 699900,
+    "mileage_km": 45200,
+    "colour": "White",
+    "vin": "AHTZZ8CDX01234567",
+    "image_urls": [
+      "https://images.example.com/fortuner-vx-white-1.jpg",
+      "https://images.example.com/fortuner-vx-white-2.jpg"
+    ],
+    "transmission": "automatic",
+    "fuel_type": "diesel",
+    "drivetrain": "4x4"
+  },
+  {
+    "source": "autotrader",
+    "source_listing_id": "28001002",
+    "url": "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8gd-6-gr-s-4x4-at/28001002",
+    "title": "2023 Toyota Fortuner 2.8 GD-6 GR-S 4x4",
+    "description": "GR Sport with factory accessories. Remaining warranty.",
+    "dealer_name": "Cape Gate Toyota",
+    "dealer_phone": "0215550202",
+    "dealer_location": "Brackenfell, Western Cape",
+    "year": 2023,
+    "make": "Toyota",
+    "model": "Fortuner",
+    "variant_raw": "2.8 GD-6 GR-S 4x4 AT",
+    "price_zar": 719900,
+    "mileage_km": 28000,
+    "colour": "Oxide Bronze",
+    "image_urls": [
+      "https://images.example.com/grs-bronze-1.jpg"
+    ],
+    "transmission": "automatic",
+    "fuel_type": "diesel",
+    "drivetrain": "4x4"
+  },
+  {
+    "source": "autotrader",
+    "source_listing_id": "28001003",
+    "url": "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.4gd-6-4x4/28001003",
+    "title": "2020 Toyota Fortuner 2.4 GD-6 4x4",
+    "description": "Clean vehicle, service history available.",
+    "dealer_name": "East Rand Motors",
+    "dealer_location": "Boksburg, Gauteng",
+    "year": 2020,
+    "make": "Toyota",
+    "model": "Fortuner",
+    "variant_raw": "2.4GD-6 4X4",
+    "price_zar": 549900,
+    "mileage_km": 89000,
+    "colour": "Silver",
+    "image_urls": [
+      "https://images.example.com/fortuner-24-1.jpg"
+    ],
+    "drivetrain": "4x4"
+  },
+  {
+    "source": "autotrader",
+    "source_listing_id": "28001004",
+    "url": "https://www.autotrader.co.za/car-for-sale/toyota/fortuner/2.8-4x2-vx/28001004",
+    "title": "2021 Toyota Fortuner 2.8 4x2 VX",
+    "description": "Should be excluded as 4x2.",
+    "dealer_name": "Durban Cars",
+    "dealer_location": "Durban, KZN",
+    "year": 2021,
+    "make": "Toyota",
+    "model": "Fortuner",
+    "variant_raw": "2.8 4x2 VX",
+    "price_zar": 629900,
+    "mileage_km": 60000,
+    "drivetrain": "4x2"
+  }
+]
