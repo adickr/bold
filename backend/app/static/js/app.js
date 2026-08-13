@@ -278,6 +278,10 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       new_today: stats.new_today,
       reductions_this_week: stats.reductions_this_week,
       median_asking_price: zar(stats.median_asking_price),
+      median_days_listed:
+        stats.median_days_listed != null ? `${stats.median_days_listed}d` : "—",
+      median_days_to_gone:
+        stats.median_days_to_gone != null ? `${stats.median_days_to_gone}d` : "—",
     };
     Object.entries(map).forEach(([key, value]) => {
       const el = document.querySelector(`[data-stat="${key}"]`);
@@ -410,6 +414,52 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     return `${Number(value).toLocaleString("en-ZA").replace(/,/g, " ")} km`;
   }
 
+  function updateCardHtml(item, kind) {
+    const title = escapeHtml(item.title || "Fortuner");
+    const href = escapeHtml(item.href || "#");
+    const price = escapeHtml(item.price_label || "—");
+    const metaBits = [fmtKm(item.mileage), item.location].filter(Boolean);
+    const meta = metaBits.length
+      ? `<p class="update-card-meta">${escapeHtml(metaBits.join(" · "))}</p>`
+      : "";
+    let badge = "Update";
+    let detail = "";
+    if (kind === "new") {
+      badge = "New";
+      detail =
+        item.deal_score != null
+          ? `<div class="update-card-detail">${scoreCellHtml({ deal_score: item.deal_score }, "sm")}<span class="mono">${price}</span></div>`
+          : `<div class="update-card-detail"><span class="mono">${price}</span></div>`;
+    } else if (kind === "cut") {
+      badge = "Price cut";
+      const cutBit = item.change_label
+        ? `${escapeHtml(item.change_label)}${item.price_label ? ` → ${price}` : ""}`
+        : price;
+      detail = `<div class="update-card-detail"><span class="mono cut">${cutBit}</span></div>`;
+    } else if (kind === "gone") {
+      badge = "Gone";
+      const days =
+        item.days_listed != null ? `${escapeHtml(String(item.days_listed))}d on market` : "";
+      const source = item.source_label || item.source || "";
+      detail = `<div class="update-card-detail"><span class="mono">${price}</span>${
+        days ? `<span class="muted tiny">${days}</span>` : ""
+      }${source ? `<span class="muted tiny">${escapeHtml(source)}</span>` : ""}</div>`;
+    } else {
+      badge = "Updated";
+      const summary = escapeHtml(
+        item.change_summary || (item.details || []).join(" · ") || "Details changed"
+      );
+      detail = `<div class="update-card-detail"><span class="change-detail">${summary}</span><span class="mono">${price}</span></div>`;
+    }
+    return `<article class="update-card" data-kind="${escapeHtml(kind)}" data-href="${href}">
+      <span class="update-card-badge">${badge}</span>
+      <h4>${title}</h4>
+      ${detail}
+      ${meta}
+      <a class="update-card-cta" href="${href}">Open details →</a>
+    </article>`;
+  }
+
   function renderChangesDialog(lastFetch) {
     const body = document.querySelector("[data-changes-body]");
     const summaryEl = document.querySelector("[data-changes-summary]");
@@ -428,66 +478,176 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     }
 
     const changes = lastFetch.changes || {};
-    const newItems = changes.new || [];
-    const cutItems = changes.price_cuts || [];
-    const updateItems = changes.updates || [];
-    if (!lastFetch.has_changes) {
-      body.innerHTML = `<p class="muted" data-changes-empty>No listing changes in the last scan.</p>`;
-      return;
+    const decks = {
+      new: changes.new || [],
+      cut: changes.price_cuts || [],
+      gone: changes.gone_recent || changes.gone || [],
+      update: changes.updates || [],
+    };
+    const labels = {
+      new: "New",
+      cut: "Cuts",
+      gone: "Gone",
+      update: "Updates",
+    };
+    const order = ["new", "cut", "gone", "update"];
+    const preferred =
+      order.find((k) => decks[k].length) ||
+      (Number(lastFetch.updated || 0) > 0 ? "update" : "new");
+
+    const tabs = order
+      .map((key) => {
+        const count = decks[key].length;
+        const active = key === preferred ? " is-active" : "";
+        return `<button type="button" class="update-tab${active}" data-deck-tab="${key}" ${
+          count ? "" : "disabled"
+        }>${labels[key]} <span class="mono">${count}</span></button>`;
+      })
+      .join("");
+
+    const panels = order
+      .map((key) => {
+        const items = decks[key];
+        const hidden = key === preferred ? "" : " hidden";
+        if (!items.length) {
+          let empty = "Nothing in this category.";
+          if (key === "gone") empty = "No disappearances in the last scan or week.";
+          if (key === "update" && Number(lastFetch.updated || 0) > 0) {
+            empty = `${Number(lastFetch.updated)} listing${
+              Number(lastFetch.updated) === 1 ? "" : "s"
+            } updated, but no field-level detail was stored.`;
+          }
+          return `<div class="update-deck-panel" data-deck-panel="${key}"${hidden}><p class="muted">${escapeHtml(
+            empty
+          )}</p></div>`;
+        }
+        const cards = items.map((item) => updateCardHtml(item, key)).join("");
+        return `<div class="update-deck-panel" data-deck-panel="${key}"${hidden}>
+          <div class="update-deck-track" data-deck-track tabindex="0">${cards}</div>
+          <div class="update-deck-nav">
+            <button type="button" class="btn-ghost" data-deck-prev aria-label="Previous">←</button>
+            <span class="muted tiny" data-deck-pos>1 / ${items.length}</span>
+            <button type="button" class="btn-ghost" data-deck-next aria-label="Next">→</button>
+          </div>
+        </div>`;
+      })
+      .join("");
+
+    const note =
+      decks.gone.length && !(changes.gone || []).length
+        ? `<p class="muted tiny section-note">Gone cards include disappearances from the last 7 days when the latest scan had none.</p>`
+        : `<p class="muted tiny section-note">Swipe or use arrows. Days listed = time we tracked the car until it left the marketplaces.</p>`;
+
+    body.innerHTML = `<div class="update-tabs" data-deck-tabs>${tabs}</div>${note}<div class="update-decks">${panels}</div>`;
+    wireUpdateDeck(body);
+  }
+
+  function wireUpdateDeck(root) {
+    const tabs = root.querySelectorAll("[data-deck-tab]");
+    const panels = root.querySelectorAll("[data-deck-panel]");
+
+    function showTab(key) {
+      tabs.forEach((t) => t.classList.toggle("is-active", t.dataset.deckTab === key));
+      panels.forEach((p) => {
+        p.hidden = p.dataset.deckPanel !== key;
+      });
+      const panel = root.querySelector(`[data-deck-panel="${key}"]`);
+      if (panel) syncDeckPos(panel);
     }
 
-    let html = "";
-    if (newItems.length) {
-      html += `<section><h3>New listings <span class="mono">${escapeHtml(lastFetch.new ?? newItems.length)}</span></h3><ul class="changes-list">`;
-      html += newItems
-        .map((item) => {
-          const scoreBit =
-            item.deal_score != null
-              ? `${scoreCellHtml({ deal_score: item.deal_score }, "sm")}`
-              : "";
-          const metaBits = [fmtKm(item.mileage), item.location].filter(Boolean).join(" · ");
-          return `<li><a href="${escapeHtml(item.href || "#")}"><strong>${escapeHtml(item.title || "Fortuner")}</strong><span class="mono change-score-line">${scoreBit}${escapeHtml(item.price_label || "—")}</span>${metaBits ? `<span class="muted tiny">${escapeHtml(metaBits)}</span>` : ""}</a></li>`;
-        })
-        .join("");
-      html += `</ul></section>`;
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        if (tab.disabled) return;
+        showTab(tab.dataset.deckTab);
+      });
+    });
+
+    panels.forEach((panel) => {
+      const track = panel.querySelector("[data-deck-track]");
+      if (!track) return;
+      const prev = panel.querySelector("[data-deck-prev]");
+      const next = panel.querySelector("[data-deck-next]");
+      const cards = () => Array.from(track.querySelectorAll(".update-card"));
+
+      function currentIndex() {
+        const list = cards();
+        if (!list.length) return 0;
+        const left = track.scrollLeft;
+        let best = 0;
+        let bestDist = Infinity;
+        list.forEach((card, i) => {
+          const dist = Math.abs(card.offsetLeft - left);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = i;
+          }
+        });
+        return best;
+      }
+
+      function go(delta) {
+        const list = cards();
+        if (!list.length) return;
+        const nextIdx = Math.max(0, Math.min(list.length - 1, currentIndex() + delta));
+        list[nextIdx].scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
+        window.setTimeout(() => syncDeckPos(panel), 220);
+      }
+
+      prev?.addEventListener("click", () => go(-1));
+      next?.addEventListener("click", () => go(1));
+      track.addEventListener("scroll", () => syncDeckPos(panel), { passive: true });
+      track.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowRight") {
+          e.preventDefault();
+          go(1);
+        } else if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          go(-1);
+        }
+      });
+
+      // Light swipe support
+      let startX = null;
+      track.addEventListener(
+        "pointerdown",
+        (e) => {
+          startX = e.clientX;
+        },
+        { passive: true }
+      );
+      track.addEventListener("pointerup", (e) => {
+        if (startX == null) return;
+        const dx = e.clientX - startX;
+        startX = null;
+        if (Math.abs(dx) < 40) return;
+        go(dx < 0 ? 1 : -1);
+      });
+    });
+
+    const active = root.querySelector(".update-tab.is-active");
+    if (active) showTab(active.dataset.deckTab);
+  }
+
+  function syncDeckPos(panel) {
+    const track = panel.querySelector("[data-deck-track]");
+    const pos = panel.querySelector("[data-deck-pos]");
+    if (!track || !pos) return;
+    const cards = Array.from(track.querySelectorAll(".update-card"));
+    if (!cards.length) {
+      pos.textContent = "0 / 0";
+      return;
     }
-    if (cutItems.length) {
-      html += `<section><h3>Price cuts <span class="mono">${escapeHtml(lastFetch.price_cuts ?? cutItems.length)}</span></h3><ul class="changes-list">`;
-      html += cutItems
-        .map((item) => {
-          const priceBit = item.change_label
-            ? `${escapeHtml(item.change_label)}${item.price_label ? ` → ${escapeHtml(item.price_label)}` : ""}`
-            : escapeHtml(item.price_label || "—");
-          const loc = item.location ? `<span class="muted tiny">${escapeHtml(item.location)}</span>` : "";
-          return `<li data-kind="cut"><a href="${escapeHtml(item.href || "#")}"><strong>${escapeHtml(item.title || "Fortuner")}</strong><span class="mono cut">${priceBit}</span>${loc}</a></li>`;
-        })
-        .join("");
-      html += `</ul></section>`;
-    }
-    if (updateItems.length) {
-      const updatedTotal = Number(lastFetch.updated || 0);
-      const countLabel = updatedTotal > updateItems.length
-        ? `${updateItems.length}/${updatedTotal}`
-        : String(updateItems.length);
-      html += `<section><h3>Detail updates <span class="mono">${escapeHtml(countLabel)}</span></h3>`;
-      html += `<p class="muted tiny section-note">Mileage, dealer, title, and other field changes from the last scan.</p>`;
-      html += `<ul class="changes-list">`;
-      html += updateItems
-        .map((item) => {
-          const detail = escapeHtml(item.change_summary || (item.details || []).join(" · ") || "Updated");
-          const loc = item.location ? `<span class="muted tiny">${escapeHtml(item.location)}</span>` : "";
-          return `<li data-kind="update"><a href="${escapeHtml(item.href || "#")}"><strong>${escapeHtml(item.title || "Fortuner")}</strong><span class="change-detail">${detail}</span>${loc}</a></li>`;
-        })
-        .join("");
-      html += `</ul></section>`;
-    } else if (Number(lastFetch.updated || 0) > 0) {
-      html += `<section><h3>Detail updates <span class="mono">${escapeHtml(lastFetch.updated)}</span></h3>`;
-      html += `<p class="muted">${Number(lastFetch.updated)} listing${Number(lastFetch.updated) === 1 ? "" : "s"} updated, but no field-level detail was stored for this scan.</p></section>`;
-    }
-    if (!html) {
-      html = `<p class="muted" data-changes-empty>Changes were counted but no detail rows are available yet.</p>`;
-    }
-    body.innerHTML = html;
+    const left = track.scrollLeft;
+    let best = 0;
+    let bestDist = Infinity;
+    cards.forEach((card, i) => {
+      const dist = Math.abs(card.offsetLeft - left);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    });
+    pos.textContent = `${best + 1} / ${cards.length}`;
   }
 
   function openChangesDialog() {

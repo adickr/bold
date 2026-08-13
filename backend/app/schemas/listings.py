@@ -108,6 +108,9 @@ class DashboardStats(BaseModel):
     new_today: int
     reductions_this_week: int
     median_asking_price: int | None
+    median_days_listed: int | None = None
+    median_days_to_gone: int | None = None
+    gone_sample_size: int = 0
     price_distribution: list[dict[str, Any]] = Field(default_factory=list)
     last_fetch: dict[str, Any] | None = None
     market_history: dict[str, Any] | None = None
