@@ -664,11 +664,47 @@ tr.is-thumbs-up td:first-child {
 }
 .detail-hero.has-media {
   display: grid;
-  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
   gap: 1.35rem 1.75rem;
   align-items: start;
 }
 .detail-hero[data-vote="down"] { opacity: 0.78; }
+.detail-media { display: grid; gap: 0.7rem; }
+.model-shot {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background:
+    radial-gradient(80% 70% at 70% 20%, rgba(196,163,90,0.08), transparent 55%),
+    linear-gradient(180deg, #1a2621 0%, #121916 100%);
+  overflow: hidden;
+}
+.model-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 800 / 520;
+}
+.model-shot figcaption {
+  padding: 0.45rem 0.7rem 0.6rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.listing-photos { display: grid; gap: 0.35rem; }
+.listing-photos-label {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.listing-photos-label span {
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.75;
+  margin-left: 0.35rem;
+}
 .detail-gallery { display: grid; gap: 0.5rem; }
 .detail-photo {
   width: 100%;

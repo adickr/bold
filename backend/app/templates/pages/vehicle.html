@@ -5,22 +5,24 @@
 {% set deal_bd = summary.deal_score_breakdown %}
 {% set mot_bd = summary.motivation_breakdown %}
 {% set images = summary.images or [] %}
+{% set shot = summary.model_shot %}
 <p class="crumb"><a href="/listings">← Listings</a></p>
-<section class="detail-hero{% if images %} has-media{% endif %}" data-vehicle-vote data-vote="{{ summary.vote or '' }}">
-  {% if images %}
-  <div class="detail-gallery" data-gallery>
-    <img class="detail-photo" data-gallery-main src="{{ images[0] }}" alt="{{ v.year }} {{ v.variant_normalised or 'Fortuner' }}" />
-    {% if images|length > 1 %}
-    <div class="detail-thumbs" role="list">
-      {% for src in images %}
-      <button type="button" class="detail-thumb{% if loop.first %} is-active{% endif %}" data-gallery-thumb="{{ src }}" aria-label="Photo {{ loop.index }}">
-        <img src="{{ src }}" alt="" />
-      </button>
-      {% endfor %}
+<section class="detail-hero has-media" data-vehicle-vote data-vote="{{ summary.vote or '' }}">
+  <div class="detail-media">
+    {% include "partials/model_shot.html" %}
+    {% if images %}
+    <div class="listing-photos" data-gallery>
+      <p class="listing-photos-label">From the listing <span>this car, if the ad photos loaded</span></p>
+      <div class="detail-thumbs" role="list">
+        {% for src in images %}
+        <a class="detail-thumb" href="{{ src }}" target="_blank" rel="noopener noreferrer" aria-label="Listing photo {{ loop.index }}">
+          <img src="{{ src }}" alt="" />
+        </a>
+        {% endfor %}
+      </div>
     </div>
     {% endif %}
   </div>
-  {% endif %}
   <div class="detail-copy">
     <p class="eyebrow">
       {% if not v.is_active %}<span class="tag is-gone">Gone</span> · {% endif %}

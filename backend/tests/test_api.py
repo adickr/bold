@@ -118,6 +118,8 @@ def test_vehicle_detail_page_clarifies_score_points(client, db_session, auth):
     assert "not days on market" in html
     assert "Facts" in html
     assert "← Listings" in html
+    assert "not this listing" in html
+    assert "Stock model" in html
 
 
 def test_html_parser_autotrader():
