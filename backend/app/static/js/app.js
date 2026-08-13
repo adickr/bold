@@ -278,15 +278,12 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
       new_today: stats.new_today,
       reductions_this_week: stats.reductions_this_week,
       median_asking_price: zar(stats.median_asking_price),
-      median_days_listed:
-        stats.median_days_listed != null ? `${stats.median_days_listed}d` : "—",
-      median_days_to_gone:
-        stats.median_days_to_gone != null ? `${stats.median_days_to_gone}d` : "—",
     };
     Object.entries(map).forEach(([key, value]) => {
       const el = document.querySelector(`[data-stat="${key}"]`);
       if (el) el.textContent = value ?? "—";
     });
+    renderTimeToSell(stats);
     renderSpot("top_deal", stats.top_deal, "Top deal");
     renderSpot("best_grs", stats.best_grs, "Best GR-S");
     renderSpot("best_vx", stats.best_vx, "Best VX");
@@ -294,6 +291,28 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     renderPriceDistribution(stats.price_distribution || [], stats.median_asking_price);
     renderLastFetch(stats.last_fetch);
     renderMarketSpark(stats.market_history);
+  }
+
+  function renderTimeToSell(stats) {
+    const root = document.querySelector("[data-time-to-sell]");
+    if (!root || !stats) return;
+    const valueEl = root.querySelector(".time-to-sell-value strong");
+    const noteEl = root.querySelector("[data-time-to-sell-note]");
+    const gone = stats.median_days_to_gone;
+    const goneN = Number(stats.gone_sample_size || 0);
+    const listed = stats.median_days_listed;
+    if (gone != null && goneN > 0) {
+      if (valueEl) valueEl.textContent = `${gone} days`;
+      if (noteEl) {
+        noteEl.textContent = `median until a matching listing disappears · last 30 days · n=${goneN}`;
+      }
+    } else {
+      if (valueEl) valueEl.textContent = "Building…";
+      if (noteEl) {
+        const listedBit = listed != null ? `${listed}d` : "—";
+        noteEl.textContent = `Needs cars in your search to leave the market (collect over a few days). Meanwhile, active matches have been listed a median of ${listedBit}.`;
+      }
+    }
   }
 
   function formatFetchTime(iso) {
