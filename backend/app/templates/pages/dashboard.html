@@ -44,10 +44,10 @@
       <p class="muted tiny">Runs AutoTrader, Cars.co.za and WeBuyCars (often 2–5 minutes). Soft criteria (mileage) keep older rows when you tighten the search later.</p>
     </form>
 
-    <dialog class="changes-dialog" data-changes-dialog>
+    <dialog class="changes-dialog updates-deck" data-changes-dialog>
       <form method="dialog" class="changes-dialog-head">
         <div>
-          <h2>All updates</h2>
+          <h2>Market updates</h2>
           <p class="muted tiny" data-changes-summary>
             {% if lf and lf.last_fetch_at %}{{ lf.full_summary or lf.summary }} · last fetch <time data-fetch-at datetime="{{ lf.last_fetch_at }}">{{ lf.last_fetch_at }}</time>{% else %}No fetch yet{% endif %}
           </p>
@@ -55,80 +55,7 @@
         <button type="submit" class="btn-ghost" value="close" aria-label="Close">Close</button>
       </form>
       <div class="changes-dialog-body" data-changes-body>
-        {% if lf and lf.has_changes %}
-          {% set new_items = (lf.changes.new if lf.changes else []) or [] %}
-          {% set cut_items = (lf.changes.price_cuts if lf.changes else []) or [] %}
-          {% set update_items = (lf.changes.updates if lf.changes else []) or [] %}
-          {% if new_items %}
-          <section>
-            <h3>New listings <span class="mono">{{ lf.new }}</span></h3>
-            <ul class="changes-list">
-              {% for item in new_items %}
-              <li>
-                <a href="{{ item.href }}">
-                  <strong>{{ item.title }}</strong>
-                  <span class="mono change-score-line">
-                    {% if item.deal_score is not none %}
-                    {{ deal_score_widget(item.deal_score, none, 'sm') }}
-                    {% endif %}
-                    {{ item.price_label or '—' }}
-                  </span>
-                  {% if item.location or item.mileage %}
-                  <span class="muted tiny">{% if item.mileage %}{{ '{:,}'.format(item.mileage).replace(',', ' ') }} km{% endif %}{% if item.mileage and item.location %} · {% endif %}{{ item.location or '' }}</span>
-                  {% endif %}
-                </a>
-              </li>
-              {% endfor %}
-            </ul>
-          </section>
-          {% endif %}
-          {% if cut_items %}
-          <section>
-            <h3>Price cuts <span class="mono">{{ lf.price_cuts }}</span></h3>
-            <ul class="changes-list">
-              {% for item in cut_items %}
-              <li data-kind="cut">
-                <a href="{{ item.href }}">
-                  <strong>{{ item.title }}</strong>
-                  <span class="mono cut">{{ item.change_label }}{% if item.price_label %} → {{ item.price_label }}{% endif %}</span>
-                  {% if item.location %}
-                  <span class="muted tiny">{{ item.location }}</span>
-                  {% endif %}
-                </a>
-              </li>
-              {% endfor %}
-            </ul>
-          </section>
-          {% endif %}
-          {% if update_items %}
-          <section>
-            <h3>Detail updates <span class="mono">{{ update_items|length }}{% if lf.updated and lf.updated > (update_items|length) %}/{{ lf.updated }}{% endif %}</span></h3>
-            <p class="muted tiny section-note">Mileage, dealer, title, and other field changes from the last scan.</p>
-            <ul class="changes-list">
-              {% for item in update_items %}
-              <li data-kind="update">
-                <a href="{{ item.href }}">
-                  <strong>{{ item.title }}</strong>
-                  <span class="change-detail">{{ item.change_summary }}</span>
-                  {% if item.location %}
-                  <span class="muted tiny">{{ item.location }}</span>
-                  {% endif %}
-                </a>
-              </li>
-              {% endfor %}
-            </ul>
-          </section>
-          {% elif lf.updated %}
-          <section>
-            <h3>Detail updates <span class="mono">{{ lf.updated }}</span></h3>
-            <p class="muted">{{ lf.updated }} listing{{ 's' if lf.updated != 1 else '' }} updated, but no field-level detail was stored for this scan.</p>
-          </section>
-          {% endif %}
-        {% elif lf and lf.last_fetch_at %}
-          <p class="muted" data-changes-empty>No listing changes in the last scan.</p>
-        {% else %}
-          <p class="muted" data-changes-empty>Run a collect to see what changed.</p>
-        {% endif %}
+        <p class="muted tiny">Loading updates…</p>
       </div>
     </dialog>
     <script type="application/json" data-last-fetch-json>{{ (stats.last_fetch or none) | tojson }}</script>
@@ -284,6 +211,10 @@
     <span><strong class="mono" data-stat="reductions_this_week">{{ stats.reductions_this_week }}</strong> cuts this week</span>
     <span class="fetch-sep">·</span>
     <span>median <strong class="mono" data-stat="median_asking_price">{{ stats.median_asking_price | zar }}</strong></span>
+    <span class="fetch-sep">·</span>
+    <span title="Median days we have tracked currently active matches">listed <strong class="mono" data-stat="median_days_listed">{% if stats.median_days_listed is not none %}{{ stats.median_days_listed }}d{% else %}—{% endif %}</strong></span>
+    <span class="fetch-sep">·</span>
+    <span title="Median days from first seen to removed (last 30 days)">{% if stats.gone_sample_size %}gone <strong class="mono" data-stat="median_days_to_gone">{% if stats.median_days_to_gone is not none %}{{ stats.median_days_to_gone }}d{% else %}—{% endif %}</strong>{% else %}gone <strong class="mono" data-stat="median_days_to_gone">—</strong>{% endif %}</span>
   </p>
 
   {% set mh = stats.market_history %}

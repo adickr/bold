@@ -451,10 +451,21 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
         or 0
     )
 
-    new_items, cut_items, update_items = _fetch_change_items(db, session_start)
-    # Box strip: material changes only (new stock + price cuts)
+    new_items, cut_items, update_items, gone_items = _fetch_change_items(db, session_start)
+    gone_recent = _fetch_gone_items(db, since=last_at - timedelta(days=7), until=None, limit=24)
+    gone_ids = {g["id"] for g in gone_items if g.get("id") is not None}
+    # Gone deck: session disappearances first, then fill from the last 7 days
+    gone_deck: list[dict[str, Any]] = list(gone_items)
+    for item in gone_recent:
+        if item.get("id") in gone_ids:
+            continue
+        gone_deck.append(item)
+        if len(gone_deck) >= 24:
+            break
+
+    # Box strip: material changes (new / cuts / gone)
     highlights: list[dict[str, Any]] = []
-    for item in new_items[:6]:
+    for item in new_items[:5]:
         score = item.get("deal_score")
         score_bit = f"score {score}" if score is not None else None
         detail_bits = [b for b in (score_bit, item.get("price_label")) if b]
@@ -477,10 +488,26 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
                 "href": item["href"],
             }
         )
+    for item in gone_items:
+        if len(highlights) >= 10:
+            break
+        days_bit = f"{item['days_listed']}d listed" if item.get("days_listed") is not None else None
+        highlights.append(
+            {
+                "kind": "gone",
+                "label": f"Gone · {item['title']}",
+                "detail": " · ".join(
+                    b for b in (item.get("price_label"), days_bit) if b
+                )
+                or None,
+                "href": item["href"],
+            }
+        )
 
-    has_material = bool(new_items or cut_items or new_count or price_cuts)
+    gone_count = len(gone_items)
+    has_material = bool(new_items or cut_items or gone_items or new_count or price_cuts)
     has_updates = bool(update_items or updated_count)
-    has_changes = bool(has_material or has_updates)
+    has_changes = bool(has_material or has_updates or gone_deck)
     return {
         "last_fetch_at": last_at.isoformat(),
         "session_started_at": session_start.isoformat(),
@@ -488,6 +515,7 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
         "updated": updated_count,
         "found": found_count,
         "price_cuts": price_cuts,
+        "gone": gone_count,
         "sources_ok": sources_ok,
         "sources_total": sources_total,
         "has_changes": has_changes,
@@ -498,10 +526,17 @@ def build_last_fetch_summary(db: Session) -> dict[str, Any] | None:
             "new": new_items,
             "price_cuts": cut_items,
             "updates": update_items,
+            "gone": gone_items,
+            "gone_recent": gone_deck,
         },
-        "summary": _fetch_material_summary(new_count, price_cuts),
-        "full_summary": _fetch_change_summary(new_count, updated_count, price_cuts, has_changes),
-        "updates_label": _updates_link_label(len(update_items), updated_count),
+        "summary": _fetch_material_summary(new_count, price_cuts, gone_count),
+        "full_summary": _fetch_change_summary(
+            new_count, updated_count, price_cuts, gone_count, has_changes
+        ),
+        "updates_label": _updates_link_label(
+            len(new_items) + len(cut_items) + gone_count + len(update_items),
+            new_count + updated_count + price_cuts + gone_count,
+        ),
     }
 
 
@@ -577,10 +612,98 @@ def _observation_field_details(
     return details, raw_fields, change_zar
 
 
+def _days_between(start: datetime | None, end: datetime | None) -> int | None:
+    a, b = _aware_dt(start), _aware_dt(end)
+    if a is None or b is None:
+        return None
+    return max(0, (b - a).days)
+
+
+def _fetch_gone_items(
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime | None = None,
+    limit: int = 40,
+) -> list[dict[str, Any]]:
+    """Listings/vehicles that left the market (status=removed), criteria-aware."""
+    from app.services.market_snapshot import _soft_match_listing, _soft_match_vehicle
+    from app.services.search_profile import get_active_criteria
+
+    criteria = get_active_criteria(db)
+    listings = list(
+        db.execute(
+            select(SourceListing)
+            .options(selectinload(SourceListing.canonical_vehicle))
+            .where(
+                SourceListing.listing_status == "removed",
+                SourceListing.updated_at >= since,
+            )
+            .order_by(SourceListing.updated_at.desc())
+            .limit(200)
+        )
+        .scalars()
+        .all()
+    )
+    items: list[dict[str, Any]] = []
+    seen_vehicle_ids: set[int] = set()
+    until_aware = _aware_dt(until) if until else None
+    for listing in listings:
+        when = _aware_dt(listing.updated_at)
+        if when is None:
+            continue
+        if until_aware and when >= until_aware:
+            continue
+        vehicle = listing.canonical_vehicle
+        if vehicle is not None:
+            if vehicle.id in seen_vehicle_ids:
+                continue
+            if not _soft_match_vehicle(vehicle, criteria):
+                continue
+            seen_vehicle_ids.add(vehicle.id)
+            title = _vehicle_change_title(vehicle)
+            price = vehicle.current_lowest_price or listing.price_zar
+            mileage = vehicle.current_mileage_km or listing.mileage_km
+            location = vehicle.primary_location or listing.dealer_location
+            href = f"/vehicles/{vehicle.id}"
+            first = vehicle.first_seen_at or listing.first_seen_at
+            vehicle_id = vehicle.id
+        else:
+            if not _soft_match_listing(listing, criteria):
+                continue
+            title = (listing.title or "Fortuner").strip()
+            price = listing.price_zar
+            mileage = listing.mileage_km
+            location = listing.dealer_location
+            href = f"/listings?q={listing.source_listing_id}"
+            first = listing.first_seen_at
+            vehicle_id = None
+        days_listed = _days_between(first, when)
+        items.append(
+            {
+                "kind": "gone",
+                "id": vehicle_id if vehicle_id is not None else -listing.id,
+                "title": title,
+                "price": price,
+                "price_label": _fmt_zar_spaces(price),
+                "mileage": mileage,
+                "location": location,
+                "days_listed": days_listed,
+                "gone_at": when.isoformat(),
+                "source": listing.source,
+                "source_label": source_label(listing.source),
+                "href": href,
+            }
+        )
+        if len(items) >= limit:
+            break
+    return items
+
+
 def _fetch_change_items(
     db: Session, session_start: datetime
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Concrete new listings, price cuts, and field-level updates from the last wave."""
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Concrete new listings, price cuts, field updates, and disappearances."""
     new_vehicles = (
         db.execute(
             select(CanonicalVehicle)
@@ -711,28 +834,33 @@ def _fetch_change_items(
         if len(update_items) >= 40:
             break
 
-    return new_items, cut_items, update_items
+    gone_items = _fetch_gone_items(db, since=session_start, limit=40)
+    return new_items, cut_items, update_items, gone_items
 
 
-def _fetch_material_summary(new: int, cuts: int) -> str:
-    if not new and not cuts:
-        return "No new stock or price cuts"
+def _fetch_material_summary(new: int, cuts: int, gone: int = 0) -> str:
+    if not new and not cuts and not gone:
+        return "No new stock, price cuts, or disappearances"
     parts: list[str] = []
     if new:
         parts.append(f"{new} new")
     if cuts:
         parts.append(f"{cuts} price cut{'s' if cuts != 1 else ''}")
+    if gone:
+        parts.append(f"{gone} gone")
     return " · ".join(parts)
 
 
 def _updates_link_label(shown: int, reported: int) -> str:
     count = max(shown, reported)
     if count <= 0:
-        return "Show all updates"
-    return f"Show all updates ({count})"
+        return "Browse updates"
+    return f"Browse updates ({count})"
 
 
-def _fetch_change_summary(new: int, updated: int, cuts: int, has_changes: bool) -> str:
+def _fetch_change_summary(
+    new: int, updated: int, cuts: int, gone: int, has_changes: bool
+) -> str:
     if not has_changes:
         return "No listing changes in the last scan"
     parts: list[str] = []
@@ -740,9 +868,26 @@ def _fetch_change_summary(new: int, updated: int, cuts: int, has_changes: bool) 
         parts.append(f"{new} new")
     if cuts:
         parts.append(f"{cuts} price cut{'s' if cuts != 1 else ''}")
+    if gone:
+        parts.append(f"{gone} gone")
     if updated:
         parts.append(f"{updated} updated")
     return " · ".join(parts)
+
+
+def build_listing_duration_stats(db: Session) -> dict[str, Any]:
+    """Median days active stock has been tracked + days-to-disappear for recent gone cars."""
+    matching = filter_vehicles(db, default_buyer_filters(db))
+    active_days = [int(v.days_tracked) for v in matching if v.days_tracked is not None]
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    gone = _fetch_gone_items(db, since=since, limit=80)
+    gone_days = [int(g["days_listed"]) for g in gone if g.get("days_listed") is not None]
+    return {
+        "median_days_listed": int(median(active_days)) if active_days else None,
+        "active_sample_size": len(active_days),
+        "median_days_to_gone": int(median(gone_days)) if gone_days else None,
+        "gone_sample_size": len(gone_days),
+    }
 
 
 def build_price_distribution(
@@ -866,11 +1011,15 @@ def dashboard_stats(db: Session) -> DashboardStats:
             motivated = vehicle_to_dict(ranked[0])
 
     median_price = int(median(prices)) if prices else None
+    duration = build_listing_duration_stats(db)
     return DashboardStats(
         active_matching=len(matching),
         new_today=new_today,
         reductions_this_week=len(reductions),
         median_asking_price=median_price,
+        median_days_listed=duration.get("median_days_listed"),
+        median_days_to_gone=duration.get("median_days_to_gone"),
+        gone_sample_size=int(duration.get("gone_sample_size") or 0),
         price_distribution=build_price_distribution(entries=price_entries),
         last_fetch=build_last_fetch_summary(db),
         market_history=build_market_history(
