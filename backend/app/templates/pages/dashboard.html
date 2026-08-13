@@ -210,12 +210,24 @@
     <span class="fetch-sep">·</span>
     <span><strong class="mono" data-stat="reductions_this_week">{{ stats.reductions_this_week }}</strong> cuts this week</span>
     <span class="fetch-sep">·</span>
-    <span>median <strong class="mono" data-stat="median_asking_price">{{ stats.median_asking_price | zar }}</strong></span>
-    <span class="fetch-sep">·</span>
-    <span title="Median days we have tracked currently active matches">listed <strong class="mono" data-stat="median_days_listed">{% if stats.median_days_listed is not none %}{{ stats.median_days_listed }}d{% else %}—{% endif %}</strong></span>
-    <span class="fetch-sep">·</span>
-    <span title="Median days from first seen to removed (last 30 days)">{% if stats.gone_sample_size %}gone <strong class="mono" data-stat="median_days_to_gone">{% if stats.median_days_to_gone is not none %}{{ stats.median_days_to_gone }}d{% else %}—{% endif %}</strong>{% else %}gone <strong class="mono" data-stat="median_days_to_gone">—</strong>{% endif %}</span>
+    <span>median ask <strong class="mono" data-stat="median_asking_price">{{ stats.median_asking_price | zar }}</strong></span>
   </p>
+
+  <div class="time-to-sell" data-time-to-sell
+       data-listed="{{ stats.median_days_listed if stats.median_days_listed is not none else '' }}"
+       data-gone="{{ stats.median_days_to_gone if stats.median_days_to_gone is not none else '' }}"
+       data-gone-n="{{ stats.gone_sample_size or 0 }}">
+    <p class="time-to-sell-label">Typical time to sell</p>
+    <p class="time-to-sell-value">
+      {% if stats.median_days_to_gone is not none and stats.gone_sample_size %}
+      <strong class="mono" data-stat="median_days_to_gone">{{ stats.median_days_to_gone }} days</strong>
+      <span class="muted tiny" data-time-to-sell-note>median until a matching listing disappears · last 30 days · n={{ stats.gone_sample_size }}</span>
+      {% else %}
+      <strong class="mono" data-stat="median_days_to_gone">Building…</strong>
+      <span class="muted tiny" data-time-to-sell-note>Needs cars in your search to leave the market (collect over a few days). Meanwhile, active matches have been listed a median of {% if stats.median_days_listed is not none %}<span data-stat="median_days_listed">{{ stats.median_days_listed }}d</span>{% else %}—{% endif %}.</span>
+      {% endif %}
+    </p>
+  </div>
 
   {% set mh = stats.market_history %}
   <div class="stock-flow" data-market-spark data-stock-flow
