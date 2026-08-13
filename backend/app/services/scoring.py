@@ -20,6 +20,133 @@ def _days_between(start: datetime | None, end: datetime | None = None) -> int:
     return max(0, (end - start).days)
 
 
+def _human_days(n: int) -> str:
+    return "1 day" if n == 1 else f"{n} days"
+
+
+def _known_fact_count(vehicle: CanonicalVehicle) -> int:
+    known = 0
+    if vehicle.year:
+        known += 1
+    if vehicle.current_mileage_km is not None:
+        known += 1
+    if vehicle.current_lowest_price is not None:
+        known += 1
+    if vehicle.primary_dealer or vehicle.primary_location:
+        known += 1
+    if vehicle.engine or vehicle.variant_normalised:
+        known += 1
+    return known
+
+
+def deal_score_inputs(
+    vehicle: CanonicalVehicle,
+    *,
+    comparable_median: int | None = None,
+) -> dict[str, str]:
+    """Human facts behind each deal-score component (not the points themselves)."""
+    price = vehicle.current_lowest_price
+    median = comparable_median
+    if median is None and vehicle.comparable_stats:
+        median = vehicle.comparable_stats.get("median_price")
+    if price and median:
+        diff_pct = (median - price) / median * 100
+        if abs(diff_pct) < 0.5:
+            price_fact = "in line with median ask"
+        elif diff_pct > 0:
+            price_fact = f"{diff_pct:.0f}% below median ask"
+        else:
+            price_fact = f"{abs(diff_pct):.0f}% above median ask"
+    elif price:
+        price_fact = "no comparable median"
+    else:
+        price_fact = "no asking price"
+
+    mileage = vehicle.current_mileage_km
+    year = vehicle.year
+    if mileage is not None and year:
+        age = max(1, datetime.now(timezone.utc).year - year)
+        expected = age * 15_000
+        ratio = mileage / expected if expected else 1
+        mileage_fact = f"{mileage:,} km · {ratio:.2f}× typical for age"
+    elif mileage is not None:
+        mileage_fact = f"{mileage:,} km"
+    else:
+        mileage_fact = "mileage unknown"
+
+    red = vehicle.total_reduction_zar or 0
+    days = vehicle.days_tracked or _days_between(vehicle.first_seen_at)
+    risks = [str(flag).replace("_", " ") for flag in (vehicle.risk_flags or [])]
+    return {
+        "price_value": price_fact,
+        "completeness": f"{_known_fact_count(vehicle)}/5 facts known",
+        "mileage": mileage_fact,
+        "reduction_history": f"R{red:,} total cuts" if red else "no cuts yet",
+        "time_on_market": f"{_human_days(days)} tracked",
+        "history_quality": ", ".join(risks) if risks else "no flags recorded",
+        "risk_penalty": (
+            f"{len(risks)} risk flag{'s' if len(risks) != 1 else ''}"
+            if risks
+            else "no penalty flags"
+        ),
+    }
+
+
+def motivation_score_inputs(
+    vehicle: CanonicalVehicle,
+    *,
+    dealer_similar_count: int | None = None,
+) -> dict[str, str]:
+    """Human facts behind each motivation component (not the points themselves)."""
+    days = vehicle.days_tracked or _days_between(vehicle.first_seen_at)
+    red = vehicle.total_reduction_zar or 0
+    sources = vehicle.source_count or 1
+    since = _days_between(vehicle.last_reduction_at) if vehicle.last_reduction_at else None
+    cues = bool(vehicle.risk_flags and "price_reduced_language" in vehicle.risk_flags)
+    now = datetime.now(timezone.utc)
+    if dealer_similar_count is None:
+        stock_fact = "similar-stock check at last score"
+    elif dealer_similar_count:
+        stock_fact = f"{dealer_similar_count} similar at this dealer"
+    else:
+        stock_fact = "no similar stock counted"
+    return {
+        "days_on_market": f"{_human_days(days)} tracked",
+        "price_reductions": f"R{red:,} total cuts" if red else "no cuts yet",
+        "reduction_timing": (
+            f"{_human_days(since)} since last cut" if since is not None else "no cut recorded"
+        ),
+        "multi_site": f"{sources} marketplace{'s' if sources != 1 else ''}",
+        "dealer_stock": stock_fact,
+        "timing": "late in the month" if now.day >= 25 else "not month-end",
+        "language_cues": "clearance phrasing found" if cues else "none spotted",
+    }
+
+
+def with_score_inputs(
+    vehicle: CanonicalVehicle,
+    breakdown: dict[str, Any] | None,
+    *,
+    kind: str,
+    dealer_similar_count: int | None = None,
+    comparable_median: int | None = None,
+) -> dict[str, Any] | None:
+    """Copy a stored breakdown and attach input facts if they are missing."""
+    if not breakdown:
+        return breakdown
+    enriched = dict(breakdown)
+    if not isinstance(enriched.get("inputs"), dict):
+        if kind == "motivation":
+            enriched["inputs"] = motivation_score_inputs(
+                vehicle, dealer_similar_count=dealer_similar_count
+            )
+        else:
+            enriched["inputs"] = deal_score_inputs(
+                vehicle, comparable_median=comparable_median
+            )
+    return enriched
+
+
 def compute_deal_score(
     vehicle: CanonicalVehicle,
     *,
@@ -45,18 +172,7 @@ def compute_deal_score(
 
     # Completeness (20) — trim-neutral. VX / GR-S do not score higher.
     # Points reflect known facts (year, mileage, dealer), not desirability.
-    known = 0
-    if vehicle.year:
-        known += 1
-    if vehicle.current_mileage_km is not None:
-        known += 1
-    if vehicle.current_lowest_price is not None:
-        known += 1
-    if vehicle.primary_dealer or vehicle.primary_location:
-        known += 1
-    if vehicle.engine or vehicle.variant_normalised:
-        known += 1
-    completeness = known / 5.0
+    completeness = _known_fact_count(vehicle) / 5.0
     spec_score = settings.score_weight_spec * (0.55 + 0.45 * completeness)
     breakdown["completeness"] = round(spec_score, 1)
 
@@ -145,9 +261,10 @@ def compute_deal_score(
     total = max(0.0, min(100.0, round(total, 1)))
     breakdown["total"] = total
     breakdown["inferred"] = True
+    breakdown["inputs"] = deal_score_inputs(vehicle, comparable_median=median)
     breakdown["note"] = (
-        "Score is inferred from asking-price listings, not confirmed sales. "
-        "Trim (VX / GR-S / etc.) does not boost the score."
+        "Each line is points toward 100, inferred from asking-price listings, "
+        "not confirmed sales. Trim (VX / GR-S / etc.) does not boost the score."
     )
     return total, breakdown
 
@@ -239,9 +356,12 @@ def compute_motivation_score(
         "reasons": reasons,
         "estimate_only": True,
         "inferred": True,
+        "inputs": motivation_score_inputs(
+            vehicle, dealer_similar_count=dealer_similar_count
+        ),
         "note": (
-            "Dealer motivation is an estimate based on listing behaviour, "
-            "not a confirmed willingness to negotiate."
+            "Each line is points toward a 100-point estimate — not days or rands. "
+            "Based on listing behaviour, not a confirmed willingness to negotiate."
         ),
     }
     return score, level, breakdown
