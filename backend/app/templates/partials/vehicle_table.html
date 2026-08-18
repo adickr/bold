@@ -31,7 +31,7 @@
           </span>
         </td>
         <td>
-          <a href="{{ v.detail_path }}"><strong>{{ v.variant or 'Fortuner' }}</strong>{% if v.is_stretch %} <em class="tag">stretch</em>{% endif %}</a>
+          <a href="{{ v.detail_path }}"><strong>{{ v.variant or v.model or 'listing' }}</strong>{% if v.is_stretch %} <em class="tag">stretch</em>{% endif %}</a>
         </td>
         <td>{{ v.price | zar }}</td>
         <td>{% if v.mileage %}{{ "{:,}".format(v.mileage) }} km{% else %}—{% endif %}</td>

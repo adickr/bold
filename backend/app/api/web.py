@@ -22,6 +22,7 @@ from app.api.queries import (
     dashboard_stats,
     default_buyer_filters,
     filter_vehicles,
+    nationwide_hunt_filters,
     vehicle_to_dict,
     vote_from_shortlist,
 )
@@ -37,7 +38,9 @@ from app.services.shortlist import ShortlistService, draft_dealer_message
 
 from app.services.collect_job import get_collect_status, start_collect_job
 from app.services.search_profile import (
+    activate_hunt,
     get_or_create_active_profile,
+    list_hunts,
     profile_to_criteria,
     save_active_profile,
 )
@@ -92,6 +95,22 @@ templates.env.filters["when"] = _fmt_when
 templates.env.filters["pts"] = _fmt_pts
 
 
+def _safe_next(raw: str | None) -> str:
+    target = (raw or "/").strip() or "/"
+    if not target.startswith("/") or target.startswith("//"):
+        return "/"
+    return target
+
+
+def _hunt_ctx(db: Session) -> dict:
+    profile = get_or_create_active_profile(db)
+    return {
+        "hunts": list_hunts(db),
+        "search_profile": profile,
+        "search_criteria": profile_to_criteria(profile),
+    }
+
+
 @router.post("/collect")
 def page_collect(user: str = Depends(require_web_user)):
     """Start a background live collection and show progress on the dashboard."""
@@ -105,7 +124,7 @@ def page_save_search_profile(
     user: str = Depends(require_web_user),
     province: str = Form(""),
     max_mileage_km: int = Form(100_000),
-    required_drivetrain: str = Form("4x4"),
+    required_drivetrain: str = Form(""),
     max_price_zar: str = Form(""),
     enforce_max_price: str | None = Form(None),
     action: str = Form("save"),
@@ -127,6 +146,17 @@ def page_save_search_profile(
     return RedirectResponse("/?saved=1", status_code=303)
 
 
+@router.post("/hunt")
+def page_activate_hunt(
+    db: Session = Depends(get_db),
+    user: str = Depends(require_web_user),
+    hunt_key: str = Form(...),
+    next: str = Form("/"),
+):
+    activate_hunt(db, hunt_key)
+    return RedirectResponse(_safe_next(next), status_code=303)
+
+
 @router.get("/collect/status")
 def page_collect_status(user: str = Depends(require_web_user)):
     return get_collect_status()
@@ -141,9 +171,7 @@ def page_live_snapshot(
     """Incremental dashboard data while collectors are running."""
     stats = dashboard_stats(db)
     matching = filter_vehicles(db, default_buyer_filters(db))
-    nationwide = filter_vehicles(
-        db, VehicleFilterParams(active_only=True, sort="deal_score_desc")
-    )
+    nationwide = filter_vehicles(db, nationwide_hunt_filters(db))
     limit = max(1, min(limit, 300))
     return {
         "collect": get_collect_status(),
@@ -230,11 +258,9 @@ def page_dashboard(
     matching = filter_vehicles(db, default_buyer_filters(db))
     list_limit = 12
     vehicles = matching[:list_limit]
-    nationwide = filter_vehicles(
-        db, VehicleFilterParams(active_only=True, sort="deal_score_desc")
-    )
+    nationwide = filter_vehicles(db, nationwide_hunt_filters(db))
     collect_status = get_collect_status()
-    profile = get_or_create_active_profile(db)
+    hunt = _hunt_ctx(db)
     return templates.TemplateResponse(
         request,
         "pages/dashboard.html",
@@ -250,9 +276,8 @@ def page_dashboard(
             "total": total,
             "scanning": bool(scanning) or collect_status.get("running"),
             "collect_status": collect_status,
-            "search_profile": profile,
-            "search_criteria": profile_to_criteria(profile),
             "saved": bool(saved),
+            **hunt,
         },
     )
 
@@ -283,6 +308,7 @@ def page_listings(
     if not request.query_params:
         params = default_buyer_filters(db)
     else:
+        hunt = default_buyer_filters(db)
         params = VehicleFilterParams(
             min_price=min_price,
             max_price=max_price,
@@ -299,11 +325,12 @@ def page_listings(
             stretch=stretch,
             sort=sort or "deal_score_desc",
             q=q or None,
+            make=hunt.make,
+            model=hunt.model,
+            fuel_type=hunt.fuel_type,
         )
     vehicles = filter_vehicles(db, params)
-    nationwide = filter_vehicles(
-        db, VehicleFilterParams(active_only=True, sort="deal_score_desc")
-    )
+    nationwide = filter_vehicles(db, nationwide_hunt_filters(db))
     return templates.TemplateResponse(
         request,
         "pages/listings.html",
@@ -313,6 +340,7 @@ def page_listings(
             "filters": params.model_dump(),
             "nationwide_count": len(nationwide),
             "page": "listings",
+            **_hunt_ctx(db),
         },
     )
 
@@ -349,6 +377,7 @@ def page_vehicle(
             "summary": vehicle_to_dict(vehicle),
             "draft": draft,
             "page": "listings",
+            **_hunt_ctx(db),
         },
     )
 
@@ -446,6 +475,7 @@ def page_shortlist(
             "user": user,
             "entries": entries,
             "page": "shortlist",
+            **_hunt_ctx(db),
         },
     )
 

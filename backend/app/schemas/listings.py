@@ -87,6 +87,9 @@ class VehicleFilterParams(BaseModel):
     max_mileage: int | None = None
     min_year: int | None = None
     max_year: int | None = None
+    make: str | None = None
+    model: str | None = None
+    fuel_type: str | None = None
     variant: str | None = None
     province: str | None = None
     dealer: str | None = None

@@ -15,6 +15,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import Settings, get_settings
 from app.schemas.listings import ListingPayload
+from app.services.hunt import looks_like_model, model_slug
 
 logger = logging.getLogger(__name__)
 
@@ -110,9 +111,27 @@ class BaseCollector(ABC):
     def load_fixture_text(self, name: str) -> str:
         return self.fixture_path(name).read_text(encoding="utf-8")
 
+    def hunt_make(self) -> str:
+        return (self.settings.make or "Toyota").strip() or "Toyota"
+
+    def hunt_model(self) -> str:
+        return (self.settings.model or "Fortuner").strip() or "Fortuner"
+
+    def hunt_model_slug(self) -> str:
+        return model_slug(self.hunt_model())
+
+    def hunt_query(self) -> str:
+        return f"{self.hunt_make()} {self.hunt_model()}"
+
+    def looks_like_hunt(self, *parts: str | None) -> bool:
+        return looks_like_model(*parts, model=self.hunt_model())
+
+    def hunt_requires_fuel(self) -> str:
+        return (self.settings.required_fuel or "").strip().lower()
+
     @abstractmethod
     def search(self) -> list[ListingPayload]:
-        """Return summary listings matching Fortuner search criteria."""
+        """Return summary listings matching the active hunt."""
 
     def fetch_detail(self, listing: ListingPayload) -> ListingPayload:
         """Optionally enrich a listing. Default: return as-is."""

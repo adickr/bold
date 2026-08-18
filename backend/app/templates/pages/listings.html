@@ -3,7 +3,7 @@
 {% block content %}
 <section class="section-head">
   <h1>Listings</h1>
-  <p class="lede">Default view: Western Cape · 4x4 · ≤100k km · highest deal score first. No price cap — expensive finds still appear when the score warrants it, and can surface in dashboard spotlights.</p>
+  <p class="lede">Default view: {{ search_profile.label if search_profile else 'active hunt' }} · highest deal score first. No price cap — expensive finds still appear when the score warrants it, and can surface in dashboard spotlights.</p>
 </section>
 
 <form class="filters" method="get" action="/listings">

@@ -273,3 +273,5 @@ def test_default_buyer_filters_follow_saved_profile(db_session):
     assert params.province == "KwaZulu-Natal"
     assert params.max_mileage == 60000
     assert params.drivetrain == "4x2"
+    assert params.model == "Fortuner"
+    assert params.fuel_type is None

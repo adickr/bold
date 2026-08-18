@@ -134,6 +134,10 @@ def detect_engine(text: str) -> str | None:
         if "GD" in t or "DIESEL" in text.upper():
             return "2.8 GD-6"
         return "2.8"
+    if "2.5" in t:
+        if re.search(r"HYBRID|\bHEV\b|\bPHEV\b", text.upper()):
+            return "2.5 Hybrid"
+        return "2.5"
     if "2.4" in t or "24GD" in t:
         return "2.4 GD-6"
     if "4.0" in t or "V6" in t:
@@ -154,6 +158,8 @@ def detect_transmission(text: str) -> str | None:
 
 def detect_fuel(text: str) -> str | None:
     t = text.upper()
+    if re.search(r"\bHYBRID\b|\bHEV\b|\bPHEV\b|PLUG[\s-]?IN|E-FOUR|PETROL[\s-]?ELECTRIC", t):
+        return "hybrid"
     if "DIESEL" in t or "GD" in t:
         return "diesel"
     if "PETROL" in t or "V6" in t:
@@ -171,6 +177,12 @@ def detect_trim(text: str) -> tuple[str | None, str | None]:
         special = "GR Sport"
     elif re.search(r"\bVX\b", t):
         trim = "VX"
+    elif re.search(r"\bADVENTURE\b", t):
+        trim = "Adventure"
+    elif re.search(r"\bGX-?R\b", t):
+        trim = "GX-R"
+    elif re.search(r"\bGX\b", t):
+        trim = "GX"
     elif re.search(r"\bLEGEND\b", t):
         trim = "Legend"
     elif re.search(r"\bEPIC\b", t):

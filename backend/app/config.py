@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     make: str = "Toyota"
     model: str = "Fortuner"
     required_drivetrain: str = "4x4"
+    required_fuel: str = ""  # hybrid | petrol | diesel | "" (any)
     preferred_province: str = "Western Cape"
     default_sort: str = "deal_score_desc"  # deal_score_desc | price_asc
     enforce_max_price: bool = False

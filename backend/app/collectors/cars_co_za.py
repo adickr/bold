@@ -63,7 +63,7 @@ class CarsCoZaCollector(BaseCollector):
         mileage_hi = max(0, int(self.settings.max_mileage_km) - 1)
         preferred = (self.settings.preferred_province or "").strip() or None
         params: dict[str, Any] = {
-            "make_model_variant": "Toyota[Fortuner]",
+            "make_model_variant": f"{self.hunt_make()}[{self.hunt_model()}]",
             "sort": "sort_rank",
             "price_type": "listing_price",
             "vfs_mileage": f"0-{mileage_hi}",
@@ -76,6 +76,9 @@ class CarsCoZaCollector(BaseCollector):
             params["vehicle_axle_config"] = "4X4"
         elif req in {"4x2", "2wd"}:
             params["vehicle_axle_config"] = "4X2"
+        fuel = (self.settings.required_fuel or "").strip().lower()
+        if fuel in {"hybrid", "hev"}:
+            params["vfs_fuel_type"] = "Hybrid"
         if self.settings.enforce_max_price:
             params["price_to"] = self.settings.stretch_price_zar
         return params
@@ -293,7 +296,7 @@ class CarsCoZaCollector(BaseCollector):
             # Real stock almost always has a price or mileage on the card/API
             if item.price_zar is None and item.mileage_km is None:
                 # URL-only slug with year+Fortuner is still ok (SSR sometimes omits text)
-                if not re.search(r"/20[0-2]\d-.*fortuner", href, re.I):
+                if not re.search(r"/20[0-2]\d-.*(?:fortuner|rav[\s\-]?4)", href, re.I) and not self.looks_like_hunt(title, href):
                     continue
             existing = by_id.get(item.source_listing_id)
             if existing:
@@ -388,7 +391,7 @@ class CarsCoZaCollector(BaseCollector):
             row = self._flatten_api_row(row)
             title = str(row.get("title") or row.get("name") or row.get("heading") or "")
             blob = f"{title} {row.get('model') or ''} {row.get('variant') or ''}"
-            if "fortuner" not in blob.lower() and str(row.get("model") or "").lower() != "fortuner":
+            if not self.looks_like_hunt(blob, str(row.get("model") or "")):
                 continue
             listing_id = str(
                 row.get("id")
@@ -415,7 +418,7 @@ class CarsCoZaCollector(BaseCollector):
             if url and str(url).startswith("/"):
                 url = f"https://www.cars.co.za{url}"
             if not url:
-                url = f"https://www.cars.co.za/for-sale/used/toyota-fortuner/{listing_id}"
+                url = f"https://www.cars.co.za/for-sale/used/toyota-{self.hunt_model_slug()}/{listing_id}"
             if "/for-sale/used/" not in str(url).lower():
                 continue
             price = row.get("price") or row.get("price_zar") or row.get("asking_price")
@@ -462,7 +465,7 @@ class CarsCoZaCollector(BaseCollector):
                     source=self.source,
                     source_listing_id=str(listing_id),
                     url=str(url),
-                    title=title or f"Toyota Fortuner {listing_id}",
+                    title=title or f"{self.hunt_make()} {self.hunt_model()} {listing_id}",
                     variant_raw=str(row.get("variant") or title or ""),
                     year=int(year) if year not in (None, "") else None,
                     price_zar=price_zar,
@@ -480,8 +483,8 @@ class CarsCoZaCollector(BaseCollector):
                         str(row.get("variant") or ""),
                         str(row.get("vehicle_axle_config") or ""),
                     ),
-                    make="Toyota",
-                    model="Fortuner",
+                    make=self.hunt_make(),
+                    model=self.hunt_model(),
                     raw_payload=row,
                 )
             )
@@ -586,7 +589,7 @@ class CarsCoZaCollector(BaseCollector):
                 if not listing_id or listing_id in seen:
                     continue
                 text = card.get_text(" ", strip=True)
-                if "fortuner" not in text.lower() and "fortuner" not in href.lower():
+                if not self.looks_like_hunt(text, href):
                     continue
                 seen.add(str(listing_id))
                 title_el = card.select_one("h2, h3, .vehicle-title, .title")
@@ -604,7 +607,7 @@ class CarsCoZaCollector(BaseCollector):
                         source=self.source,
                         source_listing_id=str(listing_id),
                         url=href.split("?")[0],
-                        title=title or f"Toyota Fortuner {listing_id}",
+                        title=title or f"{self.hunt_make()} {self.hunt_model()} {listing_id}",
                         variant_raw=title,
                         price_zar=self._price(price_el.get_text() if price_el else text),
                         mileage_km=self._mileage(text),
@@ -614,8 +617,8 @@ class CarsCoZaCollector(BaseCollector):
                         or self._location_from_url(href),
                         image_urls=self._img_urls(img),
                         drivetrain=self._drivetrain_from_text(href, title, text),
-                        make="Toyota",
-                        model="Fortuner",
+                        make=self.hunt_make(),
+                        model=self.hunt_model(),
                     )
                 )
             except Exception:
@@ -632,13 +635,13 @@ class CarsCoZaCollector(BaseCollector):
             listing_id = m.group("id")
             if listing_id in seen:
                 continue
-            if "fortuner" not in href.lower() and "fortuner" not in link.get_text(" ", strip=True).lower():
+            if not self.looks_like_hunt(href, link.get_text(" ", strip=True)):
                 continue
             seen.add(listing_id)
             container = link.find_parent(["article", "li", "div"]) or link.parent
             text = container.get_text(" ", strip=True) if container is not None else link.get_text(" ", strip=True)
             img = container.select_one("img") if hasattr(container, "select_one") else None
-            title = self._title_from_url(href) or link.get_text(strip=True) or f"Toyota Fortuner {listing_id}"
+            title = self._title_from_url(href) or link.get_text(strip=True) or f"{self.hunt_make()} {self.hunt_model()} {listing_id}"
             results.append(
                 ListingPayload(
                     source=self.source,
@@ -652,8 +655,8 @@ class CarsCoZaCollector(BaseCollector):
                     dealer_location=self._location_from_url(href),
                     image_urls=self._img_urls(img),
                     drivetrain=self._drivetrain_from_text(href, title, text),
-                    make="Toyota",
-                    model="Fortuner",
+                    make=self.hunt_make(),
+                    model=self.hunt_model(),
                 )
             )
         return results

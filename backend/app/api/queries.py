@@ -105,6 +105,9 @@ def default_buyer_filters(db: Session | None = None, **overrides: Any) -> Vehicl
             "max_mileage": settings.max_mileage_km,
             "drivetrain": settings.required_drivetrain or None,
             "province": settings.preferred_province or None,
+            "make": settings.make or None,
+            "model": settings.model or None,
+            "fuel_type": settings.required_fuel or None,
             "sort": settings.default_sort,
             "active_only": True,
         }
@@ -112,6 +115,18 @@ def default_buyer_filters(db: Session | None = None, **overrides: Any) -> Vehicl
             if value is not None:
                 data[key] = value
         return VehicleFilterParams(**data)
+
+
+def nationwide_hunt_filters(db: Session | None = None) -> VehicleFilterParams:
+    """All provinces for the active hunt — never mix Fortuner with RAV4."""
+    hunt = default_buyer_filters(db)
+    return VehicleFilterParams(
+        active_only=True,
+        sort="deal_score_desc",
+        make=hunt.make,
+        model=hunt.model,
+        fuel_type=hunt.fuel_type,
+    )
 
 
 def location_matches_province(location: str | None, province: str | None) -> bool:
@@ -281,6 +296,8 @@ def vehicle_to_dict(v: CanonicalVehicle) -> dict[str, Any]:
     return {
         "id": v.id,
         "year": v.year,
+        "make": v.make,
+        "model": v.model,
         "variant": v.variant_normalised,
         "trim": v.trim,
         "price": v.current_lowest_price,
@@ -367,6 +384,31 @@ def filter_vehicles(db: Session, params: VehicleFilterParams) -> list[CanonicalV
     if params.drivetrain:
         vehicles = [
             v for v in vehicles if _drivetrain_matches(v.drivetrain, params.drivetrain)
+        ]
+    if params.make:
+        wanted_make = params.make.lower()
+        vehicles = [v for v in vehicles if (v.make or "").lower() == wanted_make]
+    if params.model:
+        from app.services.hunt import looks_like_model
+
+        vehicles = [
+            v
+            for v in vehicles
+            if looks_like_model(v.model, v.variant_normalised, v.trim, model=params.model)
+        ]
+    if params.fuel_type:
+        from app.services.hunt import listing_matches_fuel
+
+        vehicles = [
+            v
+            for v in vehicles
+            if listing_matches_fuel(
+                v.fuel_type,
+                v.engine,
+                v.variant_normalised,
+                v.trim,
+                required_fuel=params.fuel_type,
+            )
         ]
 
     if params.shortlisted:
@@ -558,7 +600,7 @@ def _fmt_km_spaces(value: int | None) -> str | None:
 
 
 def _vehicle_change_title(vehicle: CanonicalVehicle) -> str:
-    return f"{vehicle.year or ''} {vehicle.variant_normalised or 'Fortuner'}".strip()
+    return f"{vehicle.year or ''} {vehicle.variant_normalised or vehicle.model or 'listing'}".strip()
 
 
 def _observation_field_details(

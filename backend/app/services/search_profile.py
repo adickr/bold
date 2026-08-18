@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.models.entities import SearchProfile
 from app.schemas.listings import VehicleFilterParams
+from app.services.hunt import DEFAULT_HUNT_KEY, HUNTS, hunt_preset
 
 
 def _utcnow() -> datetime:
@@ -30,6 +31,15 @@ def normalize_drivetrain(value: str | None) -> str:
     return raw
 
 
+def normalize_fuel(value: str | None) -> str:
+    raw = (value or "").strip().lower()
+    if raw in {"", "any", "all", "*"}:
+        return ""
+    if raw in {"hybrid", "hev", "phev"}:
+        return "hybrid"
+    return raw
+
+
 def criteria_dict(
     *,
     province: str | None,
@@ -37,14 +47,25 @@ def criteria_dict(
     required_drivetrain: str | None,
     max_price_zar: int | None = None,
     enforce_max_price: bool = False,
+    hunt_key: str | None = None,
+    make: str | None = None,
+    model: str | None = None,
+    required_fuel: str | None = None,
 ) -> dict[str, Any]:
+    preset = hunt_preset(hunt_key)
     province_n = (province or "").strip() or None
     drivetrain = normalize_drivetrain(required_drivetrain)
+    fuel = normalize_fuel(required_fuel if required_fuel is not None else preset.get("required_fuel"))
     mileage = max(1, int(max_mileage_km or 100_000))
     return {
+        "hunt_key": preset["key"],
+        "hunt_name": preset["name"],
+        "make": (make or preset["make"]).strip() or preset["make"],
+        "model": (model or preset["model"]).strip() or preset["model"],
         "province": province_n,
         "max_mileage_km": mileage,
         "required_drivetrain": drivetrain or None,
+        "required_fuel": fuel or None,
         "max_price_zar": int(max_price_zar) if max_price_zar else None,
         "enforce_max_price": bool(enforce_max_price),
     }
@@ -52,9 +73,13 @@ def criteria_dict(
 
 def criteria_hash(criteria: dict[str, Any]) -> str:
     payload = {
+        "hunt_key": criteria.get("hunt_key") or DEFAULT_HUNT_KEY,
+        "make": criteria.get("make") or "Toyota",
+        "model": criteria.get("model") or "Fortuner",
         "province": criteria.get("province") or None,
         "max_mileage_km": int(criteria.get("max_mileage_km") or 0),
         "required_drivetrain": criteria.get("required_drivetrain") or None,
+        "required_fuel": criteria.get("required_fuel") or None,
         "max_price_zar": criteria.get("max_price_zar"),
         "enforce_max_price": bool(criteria.get("enforce_max_price")),
     }
@@ -64,8 +89,14 @@ def criteria_hash(criteria: dict[str, Any]) -> str:
 
 def criteria_label(criteria: dict[str, Any]) -> str:
     parts: list[str] = []
+    hunt_name = criteria.get("hunt_name") or hunt_preset(criteria.get("hunt_key")).get("name")
+    if hunt_name:
+        parts.append(str(hunt_name))
     province = criteria.get("province")
     parts.append(province if province else "Nationwide")
+    fuel = criteria.get("required_fuel")
+    if fuel:
+        parts.append(fuel)
     dt = criteria.get("required_drivetrain")
     parts.append(dt if dt else "any drivetrain")
     mileage = int(criteria.get("max_mileage_km") or 0)
@@ -87,6 +118,10 @@ def criteria_from_settings(settings: Settings | None = None) -> dict[str, Any]:
         required_drivetrain=settings.required_drivetrain,
         max_price_zar=settings.max_price_zar,
         enforce_max_price=settings.enforce_max_price,
+        hunt_key=DEFAULT_HUNT_KEY,
+        make=settings.make,
+        model=settings.model,
+        required_fuel=settings.required_fuel,
     )
 
 
@@ -97,40 +132,127 @@ def profile_to_criteria(profile: SearchProfile) -> dict[str, Any]:
         required_drivetrain=profile.required_drivetrain,
         max_price_zar=profile.max_price_zar,
         enforce_max_price=profile.enforce_max_price,
+        hunt_key=getattr(profile, "hunt_key", None) or DEFAULT_HUNT_KEY,
+        make=getattr(profile, "make", None),
+        model=getattr(profile, "model", None),
+        required_fuel=getattr(profile, "required_fuel", None),
     )
+
+
+def _apply_criteria(profile: SearchProfile, criteria: dict[str, Any]) -> None:
+    profile.hunt_key = criteria.get("hunt_key") or DEFAULT_HUNT_KEY
+    profile.make = criteria.get("make") or "Toyota"
+    profile.model = criteria.get("model") or "Fortuner"
+    profile.name = criteria.get("hunt_name") or profile.name or "Active search"
+    profile.province = criteria.get("province")
+    profile.max_mileage_km = int(criteria["max_mileage_km"])
+    profile.required_drivetrain = criteria.get("required_drivetrain")
+    profile.required_fuel = criteria.get("required_fuel")
+    profile.max_price_zar = criteria.get("max_price_zar")
+    profile.enforce_max_price = bool(criteria.get("enforce_max_price"))
+    profile.criteria_hash = criteria_hash(criteria)
+    profile.label = criteria_label(criteria)
+    profile.updated_at = _utcnow()
+
+
+def _new_profile(criteria: dict[str, Any], *, is_active: bool) -> SearchProfile:
+    profile = SearchProfile(is_active=is_active)
+    _apply_criteria(profile, criteria)
+    return profile
+
+
+def ensure_hunt_profiles(db: Session) -> SearchProfile:
+    """Guarantee both hunts exist; return the active one (Fortuner by default)."""
+    rows = list(db.execute(select(SearchProfile).order_by(SearchProfile.id.asc())).scalars())
+    by_key: dict[str, SearchProfile] = {}
+    for row in rows:
+        key = (getattr(row, "hunt_key", None) or "").strip() or DEFAULT_HUNT_KEY
+        row.hunt_key = key
+        if not getattr(row, "make", None):
+            row.make = hunt_preset(key)["make"]
+        if not getattr(row, "model", None):
+            row.model = hunt_preset(key)["model"]
+        by_key.setdefault(key, row)
+
+    for key, preset in HUNTS.items():
+        if key in by_key:
+            continue
+        seed = criteria_dict(
+            province=preset.get("province"),
+            max_mileage_km=int(preset.get("max_mileage_km") or 100_000),
+            required_drivetrain=preset.get("required_drivetrain") or "",
+            hunt_key=key,
+            make=preset["make"],
+            model=preset["model"],
+            required_fuel=preset.get("required_fuel") or "",
+        )
+        profile = _new_profile(seed, is_active=False)
+        db.add(profile)
+        by_key[key] = profile
+
+    active = next((row for row in rows if row.is_active), None) or by_key.get(DEFAULT_HUNT_KEY)
+    if active is None:
+        active = next(iter(by_key.values()))
+    for row in by_key.values():
+        row.is_active = False
+    active.is_active = True
+    db.commit()
+    db.refresh(active)
+    return active
 
 
 def get_or_create_active_profile(db: Session) -> SearchProfile:
-    profile = (
-        db.execute(
-            select(SearchProfile)
-            .where(SearchProfile.is_active.is_(True))
-            .order_by(SearchProfile.id.asc())
-            .limit(1)
-        )
-        .scalars()
-        .first()
-    )
-    if profile:
-        return profile
+    return ensure_hunt_profiles(db)
 
-    seed = criteria_from_settings()
-    profile = SearchProfile(
-        name="Active search",
-        is_active=True,
-        province=seed.get("province"),
-        max_mileage_km=int(seed["max_mileage_km"]),
-        required_drivetrain=seed.get("required_drivetrain") or "4x4",
-        max_price_zar=seed.get("max_price_zar"),
-        enforce_max_price=bool(seed.get("enforce_max_price")),
-        criteria_hash=criteria_hash(seed),
-        label=criteria_label(seed),
-        updated_at=_utcnow(),
-    )
-    db.add(profile)
+
+def list_hunts(db: Session) -> list[dict[str, Any]]:
+    ensure_hunt_profiles(db)
+    rows = list(db.execute(select(SearchProfile).order_by(SearchProfile.id.asc())).scalars())
+    seen: set[str] = set()
+    hunts: list[dict[str, Any]] = []
+    for row in rows:
+        key = row.hunt_key or DEFAULT_HUNT_KEY
+        if key in seen:
+            continue
+        seen.add(key)
+        preset = hunt_preset(key)
+        hunts.append(
+            {
+                "key": key,
+                "name": preset["name"],
+                "active": bool(row.is_active),
+                "label": row.label,
+            }
+        )
+    for key, preset in HUNTS.items():
+        if key not in seen:
+            hunts.append({"key": key, "name": preset["name"], "active": False, "label": None})
+    return hunts
+
+
+def activate_hunt(db: Session, hunt_key: str) -> SearchProfile:
+    preset = hunt_preset(hunt_key)
+    ensure_hunt_profiles(db)
+    rows = list(db.execute(select(SearchProfile)).scalars())
+    chosen = next((row for row in rows if (row.hunt_key or DEFAULT_HUNT_KEY) == preset["key"]), None)
+    if chosen is None:
+        seed = criteria_dict(
+            province=preset.get("province"),
+            max_mileage_km=int(preset.get("max_mileage_km") or 100_000),
+            required_drivetrain=preset.get("required_drivetrain") or "",
+            hunt_key=preset["key"],
+            make=preset["make"],
+            model=preset["model"],
+            required_fuel=preset.get("required_fuel") or "",
+        )
+        chosen = _new_profile(seed, is_active=True)
+        db.add(chosen)
+        rows.append(chosen)
+    for row in rows:
+        row.is_active = row is chosen
     db.commit()
-    db.refresh(profile)
-    return profile
+    db.refresh(chosen)
+    return chosen
 
 
 def get_active_criteria(db: Session | None = None) -> dict[str, Any]:
@@ -157,22 +279,19 @@ def save_active_profile(
     max_price_zar: int | None = None,
     enforce_max_price: bool = False,
 ) -> SearchProfile:
+    profile = get_or_create_active_profile(db)
     criteria = criteria_dict(
         province=province,
         max_mileage_km=max_mileage_km,
         required_drivetrain=required_drivetrain,
         max_price_zar=max_price_zar,
         enforce_max_price=enforce_max_price,
+        hunt_key=profile.hunt_key or DEFAULT_HUNT_KEY,
+        make=profile.make,
+        model=profile.model,
+        required_fuel=profile.required_fuel,
     )
-    profile = get_or_create_active_profile(db)
-    profile.province = criteria.get("province")
-    profile.max_mileage_km = int(criteria["max_mileage_km"])
-    profile.required_drivetrain = criteria.get("required_drivetrain")
-    profile.max_price_zar = criteria.get("max_price_zar")
-    profile.enforce_max_price = bool(criteria.get("enforce_max_price"))
-    profile.criteria_hash = criteria_hash(criteria)
-    profile.label = criteria_label(criteria)
-    profile.updated_at = _utcnow()
+    _apply_criteria(profile, criteria)
     db.commit()
     db.refresh(profile)
     return profile
@@ -192,6 +311,9 @@ def settings_for_criteria(criteria: dict[str, Any], base: Settings | None = None
             "max_mileage_km": mileage,
             "stretch_mileage_km": stretch,
             "required_drivetrain": drivetrain or "",
+            "required_fuel": normalize_fuel(criteria.get("required_fuel")),
+            "make": criteria.get("make") or base.make,
+            "model": criteria.get("model") or base.model,
             "max_price_zar": int(max_price),
             "enforce_max_price": bool(criteria.get("enforce_max_price")),
         }
@@ -210,6 +332,9 @@ def active_buyer_filters(db: Session | None = None, **overrides: Any) -> Vehicle
         "max_mileage": int(criteria.get("max_mileage_km") or base.max_mileage_km),
         "drivetrain": criteria.get("required_drivetrain") or None,
         "province": criteria.get("province") or None,
+        "make": criteria.get("make") or None,
+        "model": criteria.get("model") or None,
+        "fuel_type": criteria.get("required_fuel") or None,
         "sort": base.default_sort,
         "active_only": True,
     }
@@ -224,7 +349,7 @@ def active_buyer_filters(db: Session | None = None, **overrides: Any) -> Vehicle
 def is_hard_reject(reasons: list[str], settings: Settings) -> bool:
     """True when a listing should be deactivated (not merely excluded from this wave)."""
     reason_set = set(reasons or [])
-    if "not_fortuner" in reason_set or "invalid_url" in reason_set:
+    if reason_set & {"not_fortuner", "wrong_model", "fuel_mismatch", "invalid_url"}:
         return True
     req = normalize_drivetrain(settings.required_drivetrain)
     if req == "4x4" and reason_set & {"4x2_excluded", "non_4x4", "drivetrain_unclear"}:

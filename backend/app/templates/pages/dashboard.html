@@ -8,8 +8,8 @@
 <section class="hero-panel">
   <div class="hero-copy">
     <p class="eyebrow">South African used market</p>
-    <h1>Toyota Fortuner watch</h1>
-    <p class="lede">Set your search, collect live listings, and rank by deal score. Changing criteria keeps prior stock in the database — the dashboard shows matches for the active search.</p>
+    <h1>{{ (sc.hunt_name or 'Fortuner 4x4') }} watch</h1>
+    <p class="lede">Set your search, collect live listings, and rank by deal score. Changing criteria keeps prior stock in the database — the dashboard shows matches for the active hunt.</p>
 
     <form method="post" action="/search-profile" class="search-profile-form" data-search-profile-form>
       <div class="search-profile-grid">
@@ -21,9 +21,10 @@
         </label>
         <label>Drivetrain
           <select name="required_drivetrain">
-            <option value="4x4" {% if (sp.required_drivetrain or '4x4') == '4x4' %}selected{% endif %}>4x4</option>
-            <option value="4x2" {% if sp.required_drivetrain == '4x2' %}selected{% endif %}>4x2</option>
-            <option value="" {% if not sp.required_drivetrain %}selected{% endif %}>Any</option>
+            {% set dt = sp.required_drivetrain or '' %}
+            <option value="4x4" {% if dt == '4x4' %}selected{% endif %}>4x4</option>
+            <option value="4x2" {% if dt == '4x2' %}selected{% endif %}>4x2</option>
+            <option value="" {% if not dt %}selected{% endif %}>Any</option>
           </select>
         </label>
         <label>Comfort price

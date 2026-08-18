@@ -17,6 +17,10 @@ def _compatible(a: CanonicalVehicle, b: CanonicalVehicle) -> bool:
         return False
     if not b.is_active:
         return False
+    if (a.make or "").strip().lower() != (b.make or "").strip().lower():
+        return False
+    if (a.model or "").strip().lower() != (b.model or "").strip().lower():
+        return False
     if a.drivetrain and b.drivetrain and a.drivetrain != b.drivetrain:
         return False
     # Avoid comparing basic 2.4 with GR-S / VX without adjustment — require similar trim tier
