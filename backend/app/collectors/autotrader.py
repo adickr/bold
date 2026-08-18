@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from app.collectors.base import BaseCollector, CollectorError
 from app.collectors.browser import browser_page, playwright_available
 from app.schemas.listings import ListingPayload
+from app.services.hunt import autotrader_model_path, looks_like_model, model_slug
 from app.services.normalise import detect_drivetrain
 
 logger = logging.getLogger(__name__)
@@ -47,10 +48,11 @@ class AutoTraderCollector(BaseCollector):
     SEARCH_URL_WC = "https://www.autotrader.co.za/cars-for-sale/western-cape/p-9/toyota/fortuner"
 
     def search_base_url(self) -> str:
+        slug = self.hunt_model_slug()
         preferred = (self.settings.preferred_province or "").strip().lower()
         if preferred in {"western cape", "wc", "western-cape"}:
-            return self.SEARCH_URL_WC
-        return self.SEARCH_URL
+            return f"https://www.autotrader.co.za/cars-for-sale/western-cape/p-9/toyota/{slug}"
+        return f"https://www.autotrader.co.za/cars-for-sale/toyota/{slug}"
 
     def build_search_params(self, page: int = 1) -> dict[str, Any]:
         """Match the live site filter shape that returns the full WC 4x4 set.
@@ -68,6 +70,9 @@ class AutoTraderCollector(BaseCollector):
             params["transmissiondrive"] = "4x4"
         elif req in {"4x2", "2wd"}:
             params["transmissiondrive"] = "4x2"
+        fuel = (self.settings.required_fuel or "").strip().lower()
+        if fuel in {"hybrid", "hev"}:
+            params["fueltype"] = "hybrid"
         if page > 1:
             params["pagenumber"] = page
         return params
@@ -354,7 +359,7 @@ class AutoTraderCollector(BaseCollector):
                 continue
             seen.add(listing_id)
             text = row.get("text") or ""
-            if "fortuner" not in text.lower() and "fortuner" not in href.lower():
+            if not self.looks_like_hunt(text, href):
                 continue
             # Prefer link-local title; never trust giant ancestor text for drivetrain
             title = self._resolve_title(self._title_from_text(text), href, text)
@@ -381,7 +386,7 @@ class AutoTraderCollector(BaseCollector):
                     drivetrain=self._resolve_drivetrain(href, compact, title),
                     image_urls=[row["img"]] if row.get("img") else [],
                     make="Toyota",
-                    model="Fortuner",
+                    model=self.hunt_model(),
                 )
             )
         return [x for x in results if self._is_plausible_card(x)]
@@ -533,19 +538,18 @@ class AutoTraderCollector(BaseCollector):
             url = url.split("?")[0]
             if not self.is_detail_url(url):
                 continue
-            if str(data.get("make") or data.get("makeModel") or "").lower().find("toyota") < 0 and "fortuner" not in url.lower():
-                # Still allow when model says Fortuner
-                if str(data.get("model") or "").lower() != "fortuner":
-                    continue
-            if str(data.get("model") or "").lower() not in {"", "fortuner"} and "fortuner" not in (
-                str(data.get("makeModel") or "") + " " + url
-            ).lower():
+            if not self.looks_like_hunt(
+                str(data.get("make") or ""),
+                str(data.get("makeModel") or ""),
+                str(data.get("model") or ""),
+                url,
+            ):
                 continue
 
             variant = str(data.get("variant") or data.get("makeModelLongVariant") or "")
             title = str(data.get("makeModelLongVariant") or "").strip()
             if not title:
-                title = f"Toyota Fortuner {variant}".strip() or self._resolve_title(None, url)
+                title = f"{self.hunt_make()} {self.hunt_model()} {variant}".strip() or self._resolve_title(None, url)
             price = self._extract_price(str(data.get("price") or ""))
             mileage = None
             transmission = None
@@ -563,9 +567,11 @@ class AutoTraderCollector(BaseCollector):
                         transmission = "automatic"
                     elif "manual" in low:
                         transmission = "manual"
-                elif "diesel" in url_icon or "petrol" in url_icon or text.lower() in {"diesel", "petrol"}:
+                elif "diesel" in url_icon or "petrol" in url_icon or "hybrid" in url_icon or text.lower() in {"diesel", "petrol", "hybrid", "hev"}:
                     low = text.lower()
-                    if "diesel" in low:
+                    if "hybrid" in low or "hev" in low:
+                        fuel = "hybrid"
+                    elif "diesel" in low:
                         fuel = "diesel"
                     elif "petrol" in low:
                         fuel = "petrol"
@@ -598,7 +604,7 @@ class AutoTraderCollector(BaseCollector):
                     fuel_type=fuel,
                     image_urls=[str(image)] if image else [],
                     make="Toyota",
-                    model="Fortuner",
+                    model=self.hunt_model(),
                     raw_payload=data,
                 )
             )
@@ -700,11 +706,7 @@ class AutoTraderCollector(BaseCollector):
                     if not image_urls and img.has_attr("srcset"):
                         image_urls.append(img.get("srcset").split(",")[0].strip().split(" ")[0])
                 raw_title = title_el.get_text(strip=True) if title_el else (link.get_text(strip=True) or None)
-                if (
-                    "fortuner" not in (raw_title or "").lower()
-                    and "fortuner" not in meta.lower()
-                    and "fortuner" not in href.lower()
-                ):
+                if not self.looks_like_hunt(raw_title, meta, href):
                     continue
                 title = self._resolve_title(raw_title, href, meta)
                 loc = location_el.get_text(strip=True) if location_el else None
@@ -725,7 +727,7 @@ class AutoTraderCollector(BaseCollector):
                         drivetrain=self._resolve_drivetrain(href, compact, title),
                         image_urls=image_urls,
                         make="Toyota",
-                        model="Fortuner",
+                        model=self.hunt_model(),
                     )
                 )
             except Exception:
@@ -743,9 +745,14 @@ class AutoTraderCollector(BaseCollector):
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup.select("script"):
             text = tag.string or ""
-            if "Fortuner" not in text or "price" not in text.lower():
+            token = "RAV4" if self.hunt_model_slug() == "rav4" else "Fortuner"
+            if token.lower() not in text.lower() or "price" not in text.lower():
                 continue
-            for blob in re.findall(r"\{[^{}]{0,40}\"id\"[^{}]{0,200}Fortuner[^{}]{0,200}\}", text):
+            for blob in re.findall(
+                rf"\{{[^{{}}]{{0,40}}\"id\"[^{{}}]{{0,200}}{re.escape(token)}[^{{}}]{{0,200}}\}}",
+                text,
+                flags=re.I,
+            ):
                 try:
                     data = json.loads(blob)
                 except Exception:
@@ -765,7 +772,7 @@ class AutoTraderCollector(BaseCollector):
             listing_id = self.listing_id_from_url(raw_url) or ""
         if not listing_id:
             return []
-        if title and "fortuner" not in str(title).lower() and data.get("model") != "Fortuner":
+        if title and not self.looks_like_hunt(str(title), str(data.get("model") or "")):
             return []
         # Only emit if we have a real detail URL — never invent short /car-for-sale/{id}
         if not raw_url:
@@ -800,7 +807,7 @@ class AutoTraderCollector(BaseCollector):
                 dealer_location=str(loc) if loc else self._location_from_url(raw_url),
                 image_urls=list(data.get("images") or data.get("imageUrls") or []),
                 make="Toyota",
-                model="Fortuner",
+                model=self.hunt_model(),
                 drivetrain=drivetrain,
                 transmission=data.get("transmission"),
                 fuel_type=data.get("fuel") or data.get("fuelType"),
@@ -813,7 +820,7 @@ class AutoTraderCollector(BaseCollector):
         results: list[ListingPayload] = []
         seen: set[str] = set()
         for match in re.finditer(
-            r"https://www\.autotrader\.co\.za/car-for-sale/toyota/fortuner/[^\"'\s>]+/\d{6,}",
+            r"https://www\.autotrader\.co\.za/car-for-sale/toyota/[^\"'\s>]+/\d{6,}",
             html,
             flags=re.I,
         ):
@@ -827,9 +834,9 @@ class AutoTraderCollector(BaseCollector):
                     source=self.source,
                     source_listing_id=listing_id,
                     url=href,
-                    title=f"Toyota Fortuner {listing_id}",
+                    title=f"{self.hunt_make()} {self.hunt_model()} {listing_id}",
                     make="Toyota",
-                    model="Fortuner",
+                    model=self.hunt_model(),
                 )
             )
         return results
@@ -968,8 +975,8 @@ class AutoTraderCollector(BaseCollector):
     @classmethod
     def _slug_from_url(cls, url: str | None) -> str | None:
         path = urlparse(url or "").path.lower().rstrip("/")
-        m = re.search(r"/car-for-sale/toyota/fortuner/([^/]+)/(\d{6,})$", path)
-        return m.group(1) if m else None
+        _model, slug, _lid = autotrader_model_path(url)
+        return slug
 
     @classmethod
     def _merge_seo_slugs(cls, base: str | None, extra: str | None) -> str | None:
@@ -988,7 +995,7 @@ class AutoTraderCollector(BaseCollector):
             for token in extra.split("-"):
                 if not token or token in base:
                     continue
-                if token in {"toyota", "fortuner"}:
+                if token in {"toyota", "fortuner", "rav4"}:
                     continue
                 parts.append(token)
             return "-".join(parts)[:90]
@@ -1004,13 +1011,11 @@ class AutoTraderCollector(BaseCollector):
     @classmethod
     def _url_slug_score(cls, url: str | None) -> int:
         """Higher = more specific SEO slug. Short `/2.8gd-6/{id}` paths often 503."""
-        path = urlparse(url or "").path.lower().rstrip("/")
-        m = re.search(r"/car-for-sale/toyota/fortuner/([^/]+)/(\d{6,})$", path)
-        if not m:
+        _model, slug, _lid = autotrader_model_path(url)
+        if not slug:
             return 0
-        slug = m.group(1)
         score = len(slug)
-        for token in ("4x4", "4x2", "vx", "gr-s", "gr-sport", "legend", "raised-body", "auto"):
+        for token in ("4x4", "4x2", "vx", "gr-s", "gr-sport", "legend", "raised-body", "auto", "hybrid", "hev", "e-four", "gx"):
             if token in slug:
                 score += 8
         if cls._slug_has_engine(slug):
@@ -1029,7 +1034,7 @@ class AutoTraderCollector(BaseCollector):
         if not text:
             return None
         raw = text.lower()
-        raw = re.sub(r"\btoyota\b|\bfortuner\b", " ", raw)
+        raw = re.sub(r"\btoyota\b|\bfortuner\b|\brav[\s\-]?4\b", " ", raw)
         # Years belong in titles, not AT SEO slugs
         raw = re.sub(r"\b20[0-2]\d\b", " ", raw)
         raw = re.sub(r"\bgr\s*sport\b", "gr-sport", raw)
@@ -1078,7 +1083,8 @@ class AutoTraderCollector(BaseCollector):
         abs_url = url.split("?")[0]
         if not cls.is_detail_url(abs_url):
             return None
-        lid = listing_id or cls.listing_id_from_url(abs_url)
+        model_slug_in_url, _cur, lid_in_url = autotrader_model_path(abs_url)
+        lid = listing_id or lid_in_url or cls.listing_id_from_url(abs_url)
         if not lid:
             return abs_url
         current_slug = cls._slug_from_url(abs_url)
@@ -1093,7 +1099,8 @@ class AutoTraderCollector(BaseCollector):
         # Refuse to drop engine evidence already present in the URL
         if cls._slug_has_engine(current_slug) and not cls._slug_has_engine(slug):
             return abs_url
-        improved = f"https://www.autotrader.co.za/car-for-sale/toyota/fortuner/{slug}/{lid}"
+        model_part = model_slug_in_url or "fortuner"
+        improved = f"https://www.autotrader.co.za/car-for-sale/toyota/{model_part}/{slug}/{lid}"
         if cls._url_slug_score(improved) > current_score:
             return improved
         return abs_url
@@ -1113,23 +1120,23 @@ class AutoTraderCollector(BaseCollector):
 
     @classmethod
     def title_from_url(cls, url: str | None) -> str | None:
-        path = urlparse(url or "").path
-        m = re.search(r"/car-for-sale/toyota/fortuner/([^/]+)/\d{6,}", path or "", re.I)
-        if not m:
+        model_part, slug, _lid = autotrader_model_path(url)
+        if not slug:
             return None
-        slug = m.group(1).replace("-", " ").strip()
-        if not slug or slug.isdigit():
+        pretty = slug.replace("-", " ").strip()
+        if not pretty or pretty.isdigit():
             return None
-        return f"Toyota Fortuner {slug}"
+        model_name = "RAV4" if (model_part or "") == "rav4" else (model_part or "fortuner").title()
+        return f"Toyota {model_name} {pretty}"
 
     @classmethod
     def _is_chip_title(cls, title: str | None) -> bool:
         t = (title or "").strip()
         if not t:
             return True
-        if re.fullmatch(r"(?i)(?:toyota\s+)?(?:fortuner\s+)?4x[24](?:\s*(?:a/?t|m/?t|auto(?:matic)?))?", t):
+        if re.fullmatch(r"(?i)(?:toyota\s+)?(?:fortuner|rav[\s\-]?4\s+)?4x[24](?:\s*(?:a/?t|m/?t|auto(?:matic)?))?", t):
             return True
-        if "fortuner" not in t.lower() and len(t) < 20:
+        if not looks_like_model(t, model="Fortuner") and not looks_like_model(t, model="RAV4") and len(t) < 20:
             return True
         return False
 
@@ -1143,13 +1150,15 @@ class AutoTraderCollector(BaseCollector):
         blob = f"{title} {item.variant_raw or ''} {slug_part}"
         if not cls.is_detail_url(url):
             return False
-        if "fortuner" not in blob.lower():
+        model_name = item.model or "Fortuner"
+        if not looks_like_model(blob, model=model_name):
             return False
-        if cls.drivetrain_from_url(url) == "4x2":
+        require_4x4 = model_slug(model_name) == "fortuner"
+        if require_4x4 and cls.drivetrain_from_url(url) == "4x2":
             return False
         # Chip titles only OK when the SEO slug itself has engine/year/trim evidence
         engineish = re.search(
-            r"\b20[0-2]\d\b|\b2[.\s-][48]\b|\b2[48]gd\b|gd-?6|\bvx\b|gr-?s|legend",
+            r"\b20[0-2]\d\b|\b2[.\s-][02458]\b|\b2[458]gd\b|gd-?6|\bvx\b|gr-?s|legend|hybrid|\bhev\b|e-four|\bgx\b|adventure",
             blob,
             re.I,
         )
@@ -1161,7 +1170,9 @@ class AutoTraderCollector(BaseCollector):
 
     @classmethod
     def _resolve_title(cls, title: str | None, url: str | None, meta: str | None = None) -> str:
-        if title and not cls._is_chip_title(title) and "fortuner" in title.lower():
+        if title and not cls._is_chip_title(title) and (
+            looks_like_model(title, model="Fortuner") or looks_like_model(title, model="RAV4")
+        ):
             return title
         from_meta = cls._title_from_text(meta or "")
         if from_meta and not cls._is_chip_title(from_meta):
@@ -1170,7 +1181,9 @@ class AutoTraderCollector(BaseCollector):
         if from_url:
             return from_url
         listing_id = cls.listing_id_from_url(url or "") or "unknown"
-        return f"Toyota Fortuner {listing_id}"
+        model_part, _slug, _lid = autotrader_model_path(url)
+        model_name = "RAV4" if (model_part or "") == "rav4" else (model_part or "fortuner").title()
+        return f"Toyota {model_name} {listing_id}"
 
     @classmethod
     def _resolve_drivetrain(cls, url: str | None, *text_bits: str | None) -> str | None:
@@ -1197,7 +1210,9 @@ class AutoTraderCollector(BaseCollector):
     def _title_from_text(text: str) -> str | None:
         for line in (text or "").splitlines():
             line = line.strip()
-            if "fortuner" in line.lower() and len(line) < 120:
+            if (
+                looks_like_model(line, model="Fortuner") or looks_like_model(line, model="RAV4")
+            ) and len(line) < 120:
                 return line
         return None
 

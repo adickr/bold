@@ -30,7 +30,7 @@
       {{ v.drivetrain or 'drivetrain unclear' }}
       {% if v.trim %} · {{ v.trim }}{% endif %}
     </p>
-    <h1>{{ v.year }} {{ v.variant_normalised or 'Fortuner' }}</h1>
+    <h1>{{ v.year }} {{ v.variant_normalised or v.model or 'listing' }}</h1>
     <p class="lede">{{ summary.dealer or 'Unknown dealer' }} · {{ summary.location or 'South Africa' }}</p>
     <div class="price-row">
       <strong>{{ summary.price | zar }}</strong>

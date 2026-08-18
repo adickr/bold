@@ -56,6 +56,12 @@ def init_db() -> None:
     alterations = {
         "collector_runs": [("criteria", "JSON")],
         "market_snapshots": [("criteria_hash", "VARCHAR(32)")],
+        "search_profiles": [
+            ("hunt_key", "VARCHAR(64) DEFAULT 'fortuner-4x4'"),
+            ("make", "VARCHAR(64) DEFAULT 'Toyota'"),
+            ("model", "VARCHAR(64) DEFAULT 'Fortuner'"),
+            ("required_fuel", "VARCHAR(32)"),
+        ],
     }
     with engine.begin() as conn:
         for table, cols in alterations.items():

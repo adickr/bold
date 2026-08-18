@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from app.config import Settings, get_settings
 from app.schemas.listings import ListingPayload, VariantInfo
+from app.services.hunt import listing_matches_fuel, looks_like_model, model_slug
 from app.services.normalise import normalise_variant
 
 
@@ -47,10 +48,24 @@ def evaluate_listing(
     reasons: list[str] = []
     risks: list[str] = []
 
-    make_ok = (listing.make or "").lower() == settings.make.lower()
-    model_ok = "fortuner" in (listing.model or listing.title or "").lower()
+    make_ok = (listing.make or "").lower() == (settings.make or "Toyota").lower()
+    wanted_model = settings.model or "Fortuner"
+    model_ok = looks_like_model(
+        listing.model, listing.title, listing.variant_raw, listing.url, model=wanted_model
+    )
     if not make_ok or not model_ok:
-        return CriteriaResult(False, reasons=["not_fortuner"], variant=variant)
+        reason = "not_fortuner" if model_slug(wanted_model) == "fortuner" else "wrong_model"
+        return CriteriaResult(False, reasons=[reason], variant=variant)
+
+    if not listing_matches_fuel(
+        listing.fuel_type,
+        listing.title,
+        listing.variant_raw,
+        listing.description,
+        listing.url,
+        required_fuel=settings.required_fuel,
+    ):
+        return CriteriaResult(False, reasons=["fuel_mismatch"], variant=variant)
 
     drivetrain = variant.drivetrain or listing.drivetrain
     path = (urlparse(listing.url or "").path or "").lower()

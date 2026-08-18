@@ -28,6 +28,7 @@ from bs4 import BeautifulSoup
 from app.collectors.base import BaseCollector, CollectorError
 from app.collectors.browser import fetch_json_from_responses, fetch_rendered_html, playwright_available
 from app.schemas.listings import ListingPayload
+from app.services.hunt import listing_matches_fuel
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ class WeBuyCarsCollector(BaseCollector):
             ("km_max", max_km),
             ("km", 0),
             ("km", max_km),
-            ("q", "Toyota Fortuner"),
+            ("q", self.hunt_query()),
         ]
         req = (self.settings.required_drivetrain or "").strip().lower().replace(" ", "")
         if req in {"4x4", "4wd", "awd"}:
@@ -114,6 +115,9 @@ class WeBuyCarsCollector(BaseCollector):
         if preferred:
             # Live site uses plain province=Western+Cape (not a JSON array)
             params.insert(-1, ("province", preferred))
+        fuel = self.hunt_requires_fuel()
+        if fuel in {"hybrid", "hev"}:
+            params.insert(-1, ("fuel", "Hybrid"))
         return params
 
     def build_search_url(self) -> str:
@@ -135,14 +139,14 @@ class WeBuyCarsCollector(BaseCollector):
             "type": "Vehicle",
             "filter_type": "all",
             "subcategory": None,
-            "q": "Toyota Fortuner",
-            "Make": ["Toyota"],
-            "Model": ["Fortuner"],
+            "q": self.hunt_query(),
+            "Make": [self.hunt_make()],
+            "Model": [self.hunt_model()],
             "Roadworthy": None,
             "Auctions": [],
             "Variant": None,
             "DealerKey": None,
-            "FuelType": None,
+            "FuelType": ["Hybrid"] if self.hunt_requires_fuel() in {"hybrid", "hev"} else None,
             "BodyType": None,
             "Gearbox": None,
             "AxleConfiguration": axle,
@@ -265,7 +269,7 @@ class WeBuyCarsCollector(BaseCollector):
         return headers
 
     def search_via_api(self) -> list[ListingPayload]:
-        """Paginate Fortuner 4x4 results via the public elastic API."""
+        """Paginate hunt results via the public elastic API."""
         pow_token = self.obtain_pow_token()
         page_size = self.PAGE_SIZE
         max_pages = max(1, self.settings.collector_max_pages)
@@ -364,7 +368,11 @@ class WeBuyCarsCollector(BaseCollector):
                 or row.get("modelDescription")
             )
             blob = f"{title} {model} {row.get('Variant') or row.get('variant') or ''}"
-            if "fortuner" not in blob.lower() and model.lower() != "fortuner":
+            if not self.looks_like_hunt(blob, model):
+                continue
+            fuel_val = str(row.get("FuelType") or row.get("fuelType") or "")
+            req_fuel = self.hunt_requires_fuel()
+            if req_fuel and fuel_val and not listing_matches_fuel(fuel_val, blob, required_fuel=req_fuel):
                 continue
             stock = str(
                 row.get("StockNumber")
@@ -416,7 +424,7 @@ class WeBuyCarsCollector(BaseCollector):
                     source=self.source,
                     source_listing_id=stock,
                     url=f"https://www.webuycars.co.za/buy-a-car/{stock}",
-                    title=str(title) if title else f"Toyota Fortuner {stock}",
+                    title=str(title) if title else f"{self.hunt_make()} {self.hunt_model()} {stock}",
                     description=str(row.get("ServiceHistory") or ""),
                     variant_raw=str(variant or ""),
                     year=int(year) if year not in (None, "") else None,
@@ -432,8 +440,8 @@ class WeBuyCarsCollector(BaseCollector):
                     fuel_type=row.get("FuelType") or row.get("fuelType"),
                     drivetrain=drivetrain,
                     availability=availability,
-                    make="Toyota",
-                    model="Fortuner",
+                    make=self.hunt_make(),
+                    model=self.hunt_model(),
                     raw_payload=row,
                 )
             )
@@ -508,7 +516,7 @@ class WeBuyCarsCollector(BaseCollector):
                     item = el.get("item") if isinstance(el, dict) else None
                     if not isinstance(item, dict):
                         continue
-                    if "fortuner" not in str(item.get("name", "")).lower() and item.get("model") != "Fortuner":
+                    if not self.looks_like_hunt(str(item.get("name", "")), str(item.get("model") or "")):
                         continue
                     stock = str(item.get("description") or "")
                     offer = item.get("offers") or {}
@@ -528,8 +536,8 @@ class WeBuyCarsCollector(BaseCollector):
                             mileage_km=int(mileage) if mileage else None,
                             image_urls=[item["image"]] if item.get("image") else [],
                             dealer_name="WeBuyCars",
-                            make="Toyota",
-                            model="Fortuner",
+                            make=self.hunt_make(),
+                            model=self.hunt_model(),
                             raw_payload=item,
                         )
                     )
@@ -562,12 +570,9 @@ class WeBuyCarsCollector(BaseCollector):
                 availability = "available"
                 if re.search(r"sale\s+in\s+progress|\breserved\b|\bsold\b", text, re.I):
                     availability = "unavailable"
-                if "fortuner" not in text.lower() and "Fortuner" not in (card.get("data-model") or ""):
-                    if "/Toyota/" in href or "fortuner" in href.lower():
-                        pass
-                    elif "fortuner" not in href.lower():
-                        if not re.search(r"/buy-a-car/[A-Z0-9]{6,}", href, re.I):
-                            continue
+                if not self.looks_like_hunt(text, href, card.get("data-model")):
+                    if not re.search(r"/buy-a-car/[A-Z0-9]{6,}", href, re.I):
+                        continue
                 seen.add(str(stock))
                 title_el = card.select_one("h2, h3, .title") if hasattr(card, "select_one") else None
                 img = card.select_one("img") if hasattr(card, "select_one") else None
@@ -585,8 +590,8 @@ class WeBuyCarsCollector(BaseCollector):
                         dealer_stock_number=str(stock),
                         image_urls=[img["src"]] if img is not None and img.has_attr("src") else [],
                         availability=availability,
-                        make="Toyota",
-                        model="Fortuner",
+                        make=self.hunt_make(),
+                        model=self.hunt_model(),
                     )
                 )
             except Exception:

@@ -39,6 +39,32 @@ a:hover { text-decoration: underline; }
 .topbar nav { display: flex; gap: 1rem; flex: 1; }
 .topbar nav a { color: var(--muted); }
 .topbar nav a.active, .topbar nav a:hover { color: var(--ink); }
+.hunt-switcher {
+  display: flex;
+  gap: 0.2rem;
+  padding: 0.18rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-2);
+}
+.hunt-switcher button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.28rem 0.75rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.hunt-switcher button:hover { color: var(--ink); }
+.hunt-switcher button.is-active {
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
 .user { color: var(--muted); font-family: var(--mono); font-size: 0.8rem; }
 .login-panel {
   max-width: 420px; margin: 3rem auto; padding: 1.75rem;

@@ -55,7 +55,7 @@ def absolute_url(url: str | None, *, source: str | None = None) -> str | None:
 
 def _slugify(text: str | None) -> str:
     raw = (text or "").lower()
-    raw = re.sub(r"toyota|fortuner", " ", raw)
+    raw = re.sub(r"toyota|fortuner|rav[\s\-]?4", " ", raw)
     raw = re.sub(r"[^a-z0-9.]+", "-", raw).strip("-")
     return raw[:80] or "4x4"
 
@@ -75,6 +75,8 @@ def rebuild_autotrader_url(
         return None
     from app.collectors.autotrader import AutoTraderCollector
 
+    from app.services.hunt import looks_like_model
+
     slug = AutoTraderCollector.slug_from_variant(variant) or AutoTraderCollector.slug_from_variant(
         title
     )
@@ -83,7 +85,11 @@ def rebuild_autotrader_url(
     # Refuse the old broken engine shape
     if re.search(r"/\d-\d|^\d-\d", slug):
         return None
-    return f"https://www.autotrader.co.za/car-for-sale/toyota/fortuner/{slug}/{listing_id}"
+    model = "fortuner"
+    blob = f"{title or ''} {variant or ''}"
+    if looks_like_model(blob, model="RAV4"):
+        model = "rav4"
+    return f"https://www.autotrader.co.za/car-for-sale/toyota/{model}/{slug}/{listing_id}"
 
 
 def looks_like_invented_autotrader_url(url: str | None) -> bool:
@@ -92,7 +98,7 @@ def looks_like_invented_autotrader_url(url: str | None) -> bool:
         return False
     path = urlparse(url).path.lower()
     # Our old slugify turned "2.4gd-6" into "2-4gd-6"
-    if re.search(r"/fortuner/\d-\d", path):
+    if re.search(r"/(fortuner|rav4)/\d-\d", path):
         return True
     # Bare /car-for-sale/{id}
     if re.match(r"^/car-for-sale/\d{6,}/?$", path):
@@ -146,11 +152,14 @@ def rebuild_cars_co_za_url(
 ) -> str | None:
     if not listing_id or not str(listing_id).isdigit():
         return None
-    slug = _slugify(title) or "toyota-fortuner"
-    if year and not str(year) in slug:
-        slug = f"{year}-toyota-fortuner-{slug}"
+    from app.services.hunt import looks_like_model
+
+    model_token = "rav4" if looks_like_model(title, model="RAV4") else "fortuner"
+    slug = _slugify(title) or model_token
+    if year and str(year) not in slug:
+        slug = f"{year}-toyota-{model_token}-{slug}"
     elif "toyota" not in slug:
-        slug = f"toyota-fortuner-{slug}"
+        slug = f"toyota-{model_token}-{slug}"
     return f"https://www.cars.co.za/for-sale/used/{slug}/{listing_id}/"
 
 

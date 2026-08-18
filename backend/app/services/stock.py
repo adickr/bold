@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.models.entities import CanonicalVehicle
+from app.services.hunt import model_slug
 from app.services.normalise import colour_swatch_css, detect_generation, normalise_colour
 
 _DEFAULT_PAINT = "#c5c8cc"
@@ -53,15 +54,17 @@ def model_shot(vehicle: CanonicalVehicle | None = None, *, colour: str | None = 
     family = normalise_colour(colour)
     generation = detect_generation(year, "")
     known = bool(colour_swatch_css(colour))
-    parts = ["Stock model"]
+    model_name = (getattr(vehicle, "model", None) if vehicle else None) or "Fortuner"
+    parts = [f"Stock {model_name}"]
     if label:
         parts.append(label)
     elif not known:
         parts.append("colour unknown")
-    if generation and "pre-facelift" in generation:
-        parts.append("pre-facelift shape")
-    elif generation and "facelift" in generation:
-        parts.append("facelift shape")
+    if model_slug(model_name) == "fortuner":
+        if generation and "pre-facelift" in generation:
+            parts.append("pre-facelift shape")
+        elif generation and "facelift" in generation:
+            parts.append("facelift shape")
     caption = " · ".join(parts) + " · not this listing"
     return {
         "paint": paint,
