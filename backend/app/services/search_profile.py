@@ -146,7 +146,7 @@ def _apply_criteria(profile: SearchProfile, criteria: dict[str, Any]) -> None:
     profile.name = criteria.get("hunt_name") or profile.name or "Active search"
     profile.province = criteria.get("province")
     profile.max_mileage_km = int(criteria["max_mileage_km"])
-    profile.required_drivetrain = criteria.get("required_drivetrain")
+    profile.required_drivetrain = criteria.get("required_drivetrain") or None
     profile.required_fuel = criteria.get("required_fuel")
     profile.max_price_zar = criteria.get("max_price_zar")
     profile.enforce_max_price = bool(criteria.get("enforce_max_price"))

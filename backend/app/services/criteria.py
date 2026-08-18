@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from app.config import Settings, get_settings
 from app.schemas.listings import ListingPayload, VariantInfo
 from app.services.hunt import listing_matches_fuel, looks_like_model, model_slug
+from app.services.normalise import normalise_variant
 
 
 NEGATIVE_PATTERNS = [

@@ -327,7 +327,7 @@ class SearchProfile(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     province: Mapped[str | None] = mapped_column(String(128))
     max_mileage_km: Mapped[int] = mapped_column(Integer, default=100_000)
-    required_drivetrain: Mapped[str | None] = mapped_column(String(16), default="4x4")
+    required_drivetrain: Mapped[str | None] = mapped_column(String(16))
     required_fuel: Mapped[str | None] = mapped_column(String(32))
     max_price_zar: Mapped[int | None] = mapped_column(Integer)
     enforce_max_price: Mapped[bool] = mapped_column(Boolean, default=False)
